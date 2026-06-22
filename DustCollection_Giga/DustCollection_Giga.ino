@@ -25,15 +25,37 @@
 
 // ── Hardware config ───────────────────────────────────────────────────────────
 static const int NUM_TOOLS = 5;
+static const int NUM_GATES = 3;  // only tools 0-2 (CNC, Table Saw, Sander) have physical gates
 
 static const char* TOOL_NAMES[NUM_TOOLS] = {
     "CNC Router", "Table Saw", "Sander", "Drill Press", "Unused"
 };
 
 // Blast gate relay pins — LOW = gate open, HIGH = gate closed
-static const int BLAST_GATE_PINS[NUM_TOOLS] = {27, 35, 39, 43, 47};
+// -1 = no physical gate for this tool (DC-only or unused)
+//
+// ── PIN SELECTION ────────────────────────────────────────────────────────────
+// Giga Display Shield uses the 40-pin high-density connector; standard D-pins
+// are largely free. Verify the three gate pins and DC_RELAY_PIN against the
+// physical shield before wiring. Known pins to AVOID:
+//   D0–D1   Serial (USB/UART)
+//   D10–D13 SPI (primary)
+//   D20–D21 I2C (Wire SDA/SCL)
+//   D50–D53 Secondary SPI / hardware peripherals
+//   D14–D19 Hardware UARTs (Serial1–Serial3 TX/RX)
+// Current gate values (27, 35, 39) and DC relay (51) are in safe ranges
+// but MUST be confirmed with the shield schematic before wiring.
+// ─────────────────────────────────────────────────────────────────────────────
+static const int BLAST_GATE_PINS[NUM_TOOLS] = {
+    27,   // CNC Router  — verify vs. shield pinout
+    35,   // Table Saw   — verify vs. shield pinout
+    39,   // Sander      — verify vs. shield pinout
+    -1,   // Drill Press — no gate, DC only
+    -1,   // Unused      — no gate
+};
 
 // DC collector relay — LOW = on, HIGH = off (active-low relay board)
+// D51 = SPI MOSI on Mega; on Giga this pin is in a different role — verify.
 static const int DC_RELAY_PIN = 51;
 
 // EmonLib CT calibration constant. See calibration note above.
@@ -133,8 +155,9 @@ void setup() {
     // 12-bit ADC required for EmonLib on ARM (EmonLib.h defines ADC_BITS = 12 for __arm__)
     analogReadResolution(ADC_BITS);
 
-    // Blast gates — start closed
+    // Blast gates — start closed (only tools with a physical gate pin)
     for (int i = 0; i < NUM_TOOLS; i++) {
+        if (BLAST_GATE_PINS[i] < 0) continue;
         pinMode(BLAST_GATE_PINS[i], OUTPUT);
         digitalWrite(BLAST_GATE_PINS[i], HIGH);
     }
@@ -336,16 +359,15 @@ void handleTouch() {
                 if (dcOn) {
                     for (int i = 0; i < NUM_TOOLS; i++) {
                         gateOpen[i] = false;
-                        digitalWrite(BLAST_GATE_PINS[i], HIGH);
-                        drawGateButton(i < NUM_TOOLS - 1 ? i : i);
+                        if (BLAST_GATE_PINS[i] >= 0) digitalWrite(BLAST_GATE_PINS[i], HIGH);
                     }
                     for (int i = 0; i < NUM_TOOLS - 1; i++) drawGateButton(i);
                     dustOff();
-                    currentState   = MONITORING;
+                    currentState    = MONITORING;
                     lastManualIndex = -1;
                 } else {
                     dustOn();
-                    currentState   = MANUAL_CONTROL;
+                    currentState    = MANUAL_CONTROL;
                     lastManualIndex = -1;
                 }
             }
@@ -376,7 +398,7 @@ void handleButtonPress(int idx) {
 
     // Toggle gate open/closed
     gateOpen[idx] = !gateOpen[idx];
-    digitalWrite(BLAST_GATE_PINS[idx], gateOpen[idx] ? LOW : HIGH);
+    if (BLAST_GATE_PINS[idx] >= 0) digitalWrite(BLAST_GATE_PINS[idx], gateOpen[idx] ? LOW : HIGH);
 
     if (gateOpen[idx]) {
         if (currentState != MANUAL_CONTROL) currentState = MANUAL_CONTROL;
@@ -431,8 +453,8 @@ void handleMonitoringState() {
     for (int i = 0; i < NUM_TOOLS; i++) {
         if (toolCurrents[i] > toolThresholds[i]) {
             gateOpen[i] = true;
-            digitalWrite(BLAST_GATE_PINS[i], LOW);
-            drawGateButton(i);
+            if (BLAST_GATE_PINS[i] >= 0) digitalWrite(BLAST_GATE_PINS[i], LOW);
+            drawGateButton(i < NUM_TOOLS - 1 ? i : 0);
             currentState = TOOL_ACTIVATING;
             stateTimer   = millis();
             break;
@@ -469,7 +491,7 @@ void handleToolDeactivatingState(unsigned long now) {
         dustOff();
         for (int i = 0; i < NUM_TOOLS; i++) {
             gateOpen[i] = false;
-            digitalWrite(BLAST_GATE_PINS[i], HIGH);
+            if (BLAST_GATE_PINS[i] >= 0) digitalWrite(BLAST_GATE_PINS[i], HIGH);
         }
         for (int i = 0; i < NUM_TOOLS - 1; i++) drawGateButton(i);
         currentState = MONITORING;
