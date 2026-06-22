@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Automated shop dust collection controller. Migrating from **Arduino Mega 2560** to **Arduino Giga R1 WiFi + Giga Display Shield**. Controls blast gate relays and detects tool power state via current sensors.
 
-Current code: `DustCollection_v3/DustCollection_v3.ino` (v6.3, released 2025-07-25).
+- **Mega (reference):** `DustCollection_v3/DustCollection_v3.ino` (v6.3, 2025-07-25) — kept as-is
+- **Giga (active):** `DustCollection_Giga/DustCollection_Giga.ino` — migration target
 
 ## Hardware — Mega 2560 (existing)
 
@@ -26,6 +27,39 @@ Current code: `DustCollection_v3/DustCollection_v3.ino` (v6.3, released 2025-07-
 | MCU | STM32H747XI (Cortex-M7 + M4), 3.3 V I/O |
 | Display | Giga Display Shield — 800×480 RGB, GT911 capacitive touch |
 | Current sensors | Same CT coils; EmonLib needs ADC resolution fix (see migration notes) |
+| Connectivity | u-blox ANNA-B112 — WiFi **and** BLE built in; no extra hardware needed for BT remote |
+
+## Planned Features (Roadmap)
+
+### In Scope
+
+**1. Giga Display GUI** *(replaces physical buttons)*
+- Touchscreen buttons on the 800×480 display to open/close each blast gate and toggle DC on/off
+- Physical wiring for the 5 manual buttons and ISRs can be removed
+- IR remote code can also be removed once GUI is fully functional
+- Libraries needed: `Arduino_GigaDisplay_GFX`, `Arduino_GigaDisplayTouch`
+
+**2. Web UI — sensor threshold tuning**
+- Serve a config page over WiFi (Giga has built-in WiFi via ANNA-B112)
+- Allow per-tool threshold adjustment without recompiling
+- Values must persist across reboots — store in Giga's onboard flash (use `FlashIAPBlockDevice` or `KVStore` from mbed) or on SD card via the Display Shield's SD slot
+- Libraries needed: `WiFi` (mbed built-in), `Arduino_MbedOS_FlashIAP` or similar for persistence
+
+**3. Energy data collection — adaptive triggering**
+- Log per-tool current readings over time to establish a per-tool idle baseline
+- Detect tool-on as a **delta above baseline** rather than a fixed absolute threshold
+- Benefits: handles sensor drift, different tool loads, and triggers DC sooner
+- Storage: rolling buffer in RAM during session; optionally log to SD card for offline analysis
+- Implementation target: replace `TOOL_THRESHOLDS[]` with a `ToolProfile` struct that holds baseline, delta threshold, and last-N samples
+
+### Future / Deferred
+
+**4. Bluetooth remote** *(deferred)*
+- Goal: handheld remote to open/close individual gates and toggle DC
+- **Note:** ESP8266MOD is WiFi-only — no Bluetooth. Two options:
+  - Use Giga's **built-in BLE** (ANNA-B112) — no extra hardware; pair a phone app or custom BLE peripheral
+  - Use an **ESP32** as the remote hardware (has BT + WiFi, runs on 3.3 V)
+- Decide on approach before implementation begins
 
 ## Libraries
 
@@ -54,6 +88,7 @@ STARTUP → MONITORING ⇄ TOOL_ACTIVATING → TOOL_RUNNING → TOOL_DEACTIVATIN
 
 - **MONITORING**: polls `toolCurrents[]` against `TOOL_THRESHOLDS[]`; opens gate + activates DC when threshold crossed
 - **MANUAL_CONTROL**: button/IR overrides gate states directly; exits when all gates closed
+  - *Migration target*: physical buttons and IR replaced by display touch events; state machine logic stays the same
 - `dustOn()` / `dustOff()` are the only functions that touch the DC relay pin
 
 ## Mega → Giga Migration Notes
