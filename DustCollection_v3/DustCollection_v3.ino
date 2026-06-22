@@ -1,0 +1,500 @@
+// Dust Collection System for Shop
+// Released Version 6.3 07/25/2025
+// Includes IR remote code - need to validate and test
+
+// Removed control for Filter and Air Valve - not implemented for use
+// Added Button T4(button 3) to turn on DC manually for Drill Press
+
+// LCD Library
+#include <LiquidCrystal_I2C.h>
+
+//Energy Monitor Library
+#include "EmonLib.h"
+
+// IR Remote Library
+#include "IRremote.h"
+
+// Hardware Configuration
+LiquidCrystal_I2C lcd(0x27,20,4);
+EnergyMonitor tools[5];  // Array of energy monitors
+
+// System Constants
+const int NUM_TOOLS = 5;  
+const int NUM_GATES = 3;  
+const double TOOL_THRESHOLDS[] = {160.0, 260.0, 240.0, 300.0, 300.0}; 
+const char* TOOL_NAMES[] = {"CNC Router", "Table Saw", "Sander", "Drill Press", "Unused"}; 
+const int BLAST_GATE_PINS[] = {27, 35, 39, 43, 47}; //outputs to 1,3,4,5,6
+const int dustCollectionRelayPin = 51;
+
+// Button Configuration
+const int BUTTON_PINS[] = {19, 18, 2, 3, 4};  // Interrupt-capable pins
+volatile bool buttonInterrupt[NUM_TOOLS] = {false};
+unsigned long lastInterruptTime[NUM_TOOLS] = {0};
+const unsigned long DEBOUNCE_TIME = 200;  // 200ms debounce
+
+// Timing Constants
+const unsigned long DISPLAY_INTERVAL = 250;      // Display update interval (ms)
+const unsigned long TOOL_TRANSITION_TIME = 500;  // Tool activation time (ms)
+const unsigned long TOOL_OFF_TRANSITION_TIME = 15000;  // Shutdown delay (ms)
+
+// System State Management
+enum SystemState {
+    STARTUP,
+    MONITORING,
+    TOOL_ACTIVATING,
+    TOOL_RUNNING,
+    TOOL_DEACTIVATING,
+    MANUAL_CONTROL
+};
+
+SystemState currentState = STARTUP;
+unsigned long stateTimer = 0;
+unsigned long previousMillis = 0;
+unsigned long startupCounter = 0;
+
+// Tool State Tracking
+bool manualGateStates[NUM_TOOLS] = {false};
+double toolCurrents[NUM_TOOLS];
+
+// Add global variable to track last manual button pressed
+int lastManualButtonIndex = -1;
+
+// Interrupt Service Routines
+void buttonISR0() { 
+    unsigned long currentTime = millis();
+    if ((currentTime - lastInterruptTime[0] > DEBOUNCE_TIME) && 
+        (digitalRead(BUTTON_PINS[0]) == LOW) && 
+        !buttonInterrupt[0]) { 
+        buttonInterrupt[0] = true; 
+        lastInterruptTime[0] = currentTime;
+    } 
+}
+void buttonISR1() { 
+    unsigned long currentTime = millis();
+    if ((currentTime - lastInterruptTime[1] > DEBOUNCE_TIME) && 
+        (digitalRead(BUTTON_PINS[1]) == LOW) && 
+        !buttonInterrupt[1]) { 
+        buttonInterrupt[1] = true; 
+        lastInterruptTime[1] = currentTime;
+    } 
+}
+void buttonISR2() { 
+    unsigned long currentTime = millis();
+    if ((currentTime - lastInterruptTime[2] > DEBOUNCE_TIME) && 
+        (digitalRead(BUTTON_PINS[2]) == LOW) && 
+        !buttonInterrupt[2]) { 
+        buttonInterrupt[2] = true; 
+        lastInterruptTime[2] = currentTime;
+    } 
+}
+void buttonISR3() { 
+    unsigned long currentTime = millis();
+    if ((currentTime - lastInterruptTime[3] > DEBOUNCE_TIME) && 
+        (digitalRead(BUTTON_PINS[3]) == LOW) && 
+        !buttonInterrupt[3]) { 
+        buttonInterrupt[3] = true; 
+        lastInterruptTime[3] = currentTime;
+    } 
+}
+
+/* -- IR Receiver -- */
+int receiver = 7; // Signal Pin of IR receiver to Arduino Digital Pin 11
+
+/*-----( Declare objects )-----*/
+IRrecv irrecv(receiver);     // create instance of 'irrecv'
+//vairable uses to store the last decodedRawData
+uint32_t last_decodedRawData = 0;
+/*-----( Function )-----*/
+void translateIR() {
+  // Check if it is a repeat IR code 
+  if (irrecv.decodedIRData.flags) {
+    irrecv.decodedIRData.decodedRawData = last_decodedRawData;
+    // Serial.println("REPEAT!");
+  } else {
+    // Serial.print("IR code:0x");
+    Serial.println(irrecv.decodedIRData.decodedRawData, HEX);
+  }
+
+  switch (irrecv.decodedIRData.decodedRawData) {
+    case 0xF30CFF00: // Button "1"
+      handleButtonPress(0);  // Control blast gate 1
+      break;
+    case 0xE718FF00: // Button "2"
+      handleButtonPress(1);  // Control blast gate 2
+      break;
+    case 0xA15EFF00: // Button "3"
+      handleButtonPress(2);  // Control blast gate 3
+      break;
+    case 0xF708FF00: // Button "4"
+      handleButtonPress(3);  // Control blast gate 4 OR Dust Filter Motor
+      break;
+    case 0xE31CFF00: // Button "5"
+      handleButtonPress(4);  // Control Air Valve Open and Close
+    //   Serial.print("Button 5 Pressed");
+      break;
+    case 0xA55AFF00: // Button "6"
+      handleButtonPress(4);  // Control other device
+    //   Serial.print("Button 6 Pressed");
+      break;
+  }
+  
+  last_decodedRawData = irrecv.decodedIRData.decodedRawData;
+  delay(500);
+}
+
+void setup() {
+    Serial.begin(115200);
+    startupCounter = 0;
+    
+    // Initialize LCD
+    lcd.init();
+    lcd.backlight();
+    displayStartupScreen();
+
+    // Initialize tools
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        tools[i].current(i, 111.1);
+    }
+
+    // Initialize outputs
+    pinMode(dustCollectionRelayPin, OUTPUT);
+    digitalWrite(dustCollectionRelayPin, HIGH);  // Start with dust collection off
+
+    // Initialize blast gates
+    for(int i = 0; i < sizeof(BLAST_GATE_PINS)/sizeof(BLAST_GATE_PINS[0]); i++) {
+        pinMode(BLAST_GATE_PINS[i], OUTPUT);
+        digitalWrite(BLAST_GATE_PINS[i], HIGH);  // Start with gates closed
+    }
+
+    // Initialize button interrupts with pullup and noise filtering
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        pinMode(BUTTON_PINS[i], INPUT_PULLUP);
+        
+        // Add some delay between pin configurations
+        delay(50);
+    }
+    
+    // Clear any pending interrupts
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        buttonInterrupt[i] = false;
+        lastInterruptTime[i] = millis();
+    }
+    
+    delay(100);  // Longer delay to ensure stability
+    
+    // Attach interrupts last, after everything is stable
+    attachInterrupt(digitalPinToInterrupt(BUTTON_PINS[0]), buttonISR0, FALLING);
+    delay(50);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_PINS[1]), buttonISR1, FALLING);
+    delay(50);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_PINS[2]), buttonISR2, FALLING);
+    delay(50);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_PINS[3]), buttonISR3, FALLING);
+
+    // Serial.println("Setup complete - monitoring buttons"); 
+
+    /* -- IR Setup --*/
+    // Serial.println("IR Receiver Button Decode");
+    irrecv.enableIRIn(); // Start the receiver
+    /* End IR Setup --*/
+}
+
+void loop() {
+    unsigned long currentMillis = millis();
+    
+    // Handle button interrupts
+    checkButtonInterrupts();
+    
+    // Read current values
+    updateToolCurrents();
+
+    // Update display periodically
+    if (currentMillis - previousMillis >= DISPLAY_INTERVAL) {
+        updateDisplay();
+        previousMillis = currentMillis;
+    }
+
+    // State machine
+    switch(currentState) {
+        case STARTUP:
+            handleStartupState();
+            break;
+
+        case MONITORING:
+            handleMonitoringState();
+            break;
+
+        case TOOL_ACTIVATING:
+            handleToolActivatingState(currentMillis);
+            break;
+
+        case TOOL_RUNNING:
+            handleToolRunningState();
+            break;
+
+        case TOOL_DEACTIVATING:
+            handleToolDeactivatingState(currentMillis);
+            break;
+
+        case MANUAL_CONTROL:
+            handleManualControlState(currentMillis);
+            break;
+    }
+
+    /* -- IR Code loop to translate IR Codes -- */
+    if (irrecv.decode()) // have we received an IR signal?
+    {
+      translateIR();
+      irrecv.resume(); // receive the next value
+    }
+}
+
+// Helper Functions
+void displayStartupScreen() {
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("ShopTool Monitor");
+    lcd.setCursor(0,1);
+    lcd.print("DC v6.18");
+    delay(2000);
+    lcd.clear();
+}
+
+void updateToolCurrents() {
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        toolCurrents[i] = tools[i].calcIrms(1480);
+    }
+}
+
+void updateDisplay() {
+    for(int i = 0; i < NUM_GATES; i++) {
+        lcd.setCursor((i % 2) * 10, 2 + (i / 2));
+        lcd.print("T");
+        lcd.print(i + 1);
+        lcd.print(" ");
+        lcd.print(toolCurrents[i], 1);
+    }
+}
+
+
+void updateGateStatusDisplay() {
+    lcd.setCursor(0, 1);
+    lcd.print("BG ");
+    for(int i = 0; i < NUM_GATES; i++) {
+        lcd.print(i + 1);
+        lcd.print(":");
+        lcd.print(manualGateStates[i] ? "O" : "C");
+        lcd.print(" ");
+    }
+}
+
+void checkButtonInterrupts() {
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        if (buttonInterrupt[i]) {
+            // Double-check the pin state
+            if (digitalRead(BUTTON_PINS[i]) == LOW) {  // Verify button is actually pressed
+                handleButtonPress(i);
+            } else {
+                // Add LCD notification for false trigger
+                lcd.setCursor(10, 3);
+                lcd.print("FT: T");
+                lcd.print(i + 1);
+                lcd.print("    ");
+                // Serial.print("False trigger on pin ");
+                // Serial.println(BUTTON_PINS[i]);
+            }
+            buttonInterrupt[i] = false;
+        }
+    }
+}
+
+void handleButtonPress(int buttonIndex) {
+    if (buttonIndex == 3) {
+        // For buttonRSR3, just turn dustOn, do not open/close any blast gates
+        dustOn();
+        if (currentState != MANUAL_CONTROL) {
+            currentState = MANUAL_CONTROL;
+        }
+        lastManualButtonIndex = buttonIndex;
+        return;
+    }
+    manualGateStates[buttonIndex] = !manualGateStates[buttonIndex];
+    digitalWrite(BLAST_GATE_PINS[buttonIndex], !manualGateStates[buttonIndex]);
+    
+    // Only trigger dustOn for T1, T2, T3 (buttonIndex 0, 1, 2)
+    if (buttonIndex <= 2) {
+        if (currentState != MANUAL_CONTROL) {
+            currentState = MANUAL_CONTROL;
+            dustOn();
+        }
+        // Only update gate status display for T1, T2, T3
+        updateGateStatusDisplay();
+    } else {
+        if (currentState != MANUAL_CONTROL) {
+            currentState = MANUAL_CONTROL;
+        }
+    }
+    
+    // Track last manual button pressed
+    lastManualButtonIndex = buttonIndex;
+    
+    // Only trigger dustOff and LCD update for T1, T2, T3 (buttonIndex 0, 1, 2)
+    if (buttonIndex <= 2) {
+        // Check if all gates are closed
+        if (areAllGatesClosed() && currentState == MANUAL_CONTROL) {
+            dustOff();
+            currentState = MONITORING; 
+            lcd.setCursor(0,0);
+            lcd.print("            ");
+            lcd.setCursor(0,0);
+            lcd.print("DC OFF             ");
+        }
+    }
+}
+
+bool areAllGatesClosed() {
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        if (manualGateStates[i]) return false;
+    }
+    return true;
+}
+
+// Helper function to print state to serial
+void printStateToSerial(SystemState state) {
+    switch(state) {
+        case STARTUP:
+            Serial.println("[STATE] STARTUP");
+            break;
+        case MONITORING:
+            Serial.println("[STATE] MONITORING");
+            break;
+        case TOOL_ACTIVATING:
+            Serial.println("[STATE] TOOL_ACTIVATING");
+            break;
+        case TOOL_RUNNING:
+            Serial.println("[STATE] TOOL_RUNNING");
+            break;
+        case TOOL_DEACTIVATING:
+            Serial.println("[STATE] TOOL_DEACTIVATING");
+            break;
+        case MANUAL_CONTROL:
+            Serial.println("[STATE] MANUAL_CONTROL");
+            break;
+    }
+}
+
+// State Handler Functions
+void handleStartupState() {
+    static bool entered = false;
+    if (!entered) { printStateToSerial(STARTUP); entered = true; }
+    if (startupCounter++ >= 5) {
+        currentState = MONITORING;
+        entered = false;
+    }
+}
+
+void handleMonitoringState() {
+    static bool entered = false;
+    if (!entered) { printStateToSerial(MONITORING); entered = true; }
+    // Clear row 3 to remove any special messages
+    lcd.setCursor(0,0);
+    lcd.print("                    ");
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        if(toolCurrents[i] > TOOL_THRESHOLDS[i]) {
+            digitalWrite(BLAST_GATE_PINS[i], LOW);
+            lcd.print("            ");
+            lcd.setCursor(0,0);
+            lcd.print(TOOL_NAMES[i]);
+            lcd.print(" ~ DC ON");
+            currentState = TOOL_ACTIVATING;
+            entered = false;
+            stateTimer = millis();
+            break;
+        }
+    }
+}
+
+void handleToolActivatingState(unsigned long currentMillis) {
+    static bool entered = false;
+    if (!entered) { printStateToSerial(TOOL_ACTIVATING); entered = true; }
+    if (currentMillis - stateTimer >= TOOL_TRANSITION_TIME) {
+        dustOn();
+        currentState = TOOL_RUNNING;
+        entered = false;
+    }
+}
+
+void handleToolRunningState() {
+    static bool entered = false;
+    if (!entered) { printStateToSerial(TOOL_RUNNING); entered = true; }
+    bool allToolsOff = true;
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        if(toolCurrents[i] > (TOOL_THRESHOLDS[i] * 0.8)) {
+            allToolsOff = false;
+            break;
+        }
+    }
+    
+    if (allToolsOff) {
+        // clearRow(3);
+        lcd.print("            ");
+        lcd.setCursor(0,0);
+        lcd.print("Shutting down...");
+        currentState = TOOL_DEACTIVATING;
+        entered = false;
+        stateTimer = millis();
+    }
+}
+
+void handleToolDeactivatingState(unsigned long currentMillis) {
+    static bool entered = false;
+    if (!entered) { printStateToSerial(TOOL_DEACTIVATING); entered = true; }
+    for(int i = 0; i < NUM_TOOLS; i++) {
+        if(toolCurrents[i] > (TOOL_THRESHOLDS[i] * 0.8)) {
+            currentState = TOOL_RUNNING;
+            entered = false;
+            return;
+        }
+    }
+    
+    if (currentMillis - stateTimer >= TOOL_OFF_TRANSITION_TIME) {
+        dustOff();
+        for(int i = 0; i < sizeof(BLAST_GATE_PINS)/sizeof(BLAST_GATE_PINS[0]); i++) {
+            digitalWrite(BLAST_GATE_PINS[i], HIGH);
+        }
+        // clearRow(3);
+        lcd.setCursor(0,0);
+        lcd.print("            ");
+        lcd.print("DC OFF    ");
+        currentState = MONITORING;
+        entered = false;
+    }
+}
+
+void handleManualControlState(unsigned long currentMillis) {
+    static bool entered = false;
+    if (!entered) { printStateToSerial(MANUAL_CONTROL); entered = true; }
+    // Only show BTN:DC ON for T1, T2, T3
+    lcd.setCursor(0,0);
+    // lcd.print("            ");
+    if (lastManualButtonIndex >= 0 && lastManualButtonIndex <= 2) {
+        lcd.setCursor(0,0);
+        lcd.print("BTN:DC ON");
+    }
+    updateGateStatusDisplay();
+}
+
+void dustOn() {
+    digitalWrite(dustCollectionRelayPin, LOW);
+    // Serial.println("Dust Collector ON");
+}
+
+void dustOff() {
+    digitalWrite(dustCollectionRelayPin, HIGH);
+    // Serial.println("Dust Collector OFF");
+}
+
+void clearRow(byte rowToClear) {
+    lcd.setCursor(0, rowToClear);
+    lcd.print("                    ");
+}
