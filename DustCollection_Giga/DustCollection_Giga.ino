@@ -111,10 +111,10 @@ static const uint16_t C_DISABLED = 0x2104;
 struct Rect { int16_t x, y, w, h; };
 
 static const Rect GATE_BTN[NUM_TOOLS] = {
-    { 10, 120, 184, 140},
-    {204, 120, 184, 140},
-    {398, 120, 184, 140},
-    {592, 120, 184, 140},
+    { 14, 120, 184, 140},
+    {210, 120, 184, 140},
+    {406, 120, 184, 140},
+    {602, 120, 184, 140},
     {  0,   0,   0,   0},
 };
 static const Rect DC_BTN = {275, 385, 250, 80};
@@ -239,15 +239,15 @@ void drawWifiStatus() {
         IPAddress ip = WiFi.localIP();
         char buf[20];
         snprintf(buf, sizeof(buf), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-        tft.setTextSize(1);
-        tft.setCursor(475, 10);
-        tft.print("WiFi: ");
         tft.setTextSize(2);
-        tft.setCursor(475, 26);
+        tft.setCursor(475, 15);
+        tft.print("WiFi: ");
+        tft.setTextSize(3);
+        tft.setCursor(545, 15);
         tft.print(buf);
     } else {
         tft.setTextSize(2);
-        tft.setCursor(475, 26);
+        tft.setCursor(475, 15);
         tft.print("WiFi: --");
     }
 }
@@ -513,11 +513,11 @@ void drawFullUI() {
     tft.fillRect(0, 0, SCREEN_W, 55, C_HEADER);
     tft.setTextColor(C_WHITE);
     tft.setTextSize(3);
-    tft.setCursor(10, 13);
+    tft.setCursor(12, 15);
     tft.print("Dust Collection Control");
 
     tft.setTextSize(2);
-    tft.setCursor(10, 270);
+    tft.setCursor(12, 280);
     tft.print("Currents:");
 
     for (int i = 0; i < NUM_TOOLS - 1; i++) drawGateButton(i);
@@ -538,7 +538,7 @@ void drawGateButton(int idx) {
     tft.drawRoundRect(r.x, r.y, r.w, r.h, 10, C_WHITE);
     tft.setTextSize(2);
     tft.setTextColor(C_WHITE);
-    tft.setCursor(r.x + 8, r.y + 16);
+    tft.setCursor(r.x + 16, r.y + 16);
     tft.print(TOOL_NAMES[idx]);
     tft.setTextSize(3);
     tft.setCursor(r.x + 20, r.y + 75);
@@ -553,15 +553,15 @@ void drawDCButton() {
     tft.drawRoundRect(r.x, r.y, r.w, r.h, 12, C_WHITE);
     tft.setTextColor(C_WHITE);
     tft.setTextSize(3);
-    tft.setCursor(r.x + r.w / 2 - (dcOn ? 45 : 54), r.y + 22);
+    tft.setCursor(r.x + r.w / 2 - (dcOn ? 45 : 54), r.y + 28);
     tft.print(dcOn ? "DC ON" : "DC OFF");
 }
 
 void drawStatusBar() {
     tft.fillRect(0, 60, 470, 35, C_BG);
-    tft.setTextSize(2);
+    tft.setTextSize(3);
     tft.setTextColor(C_WHITE);
-    tft.setCursor(10, 68);
+    tft.setCursor(12, 68);
     switch (currentState) {
         case STARTUP:           tft.print("Starting up...     "); break;
         case MONITORING:        tft.print("Monitoring         "); break;
@@ -574,11 +574,11 @@ void drawStatusBar() {
 
 void drawCurrentsRow() {
     tft.fillRect(0, 295, SCREEN_W, 55, C_BG);
-    tft.setTextSize(2);
+    tft.setTextSize(4);
     for (int i = 0; i < 3; i++) {
         bool over = toolCurrents[i] > toolThresholds[i];
         tft.setTextColor(over ? C_ACTIVE : C_WHITE);
-        tft.setCursor(10 + i * 250, 305);
+        tft.setCursor(10 + i * 270, 315);
         tft.print("T"); tft.print(i + 1); tft.print(":");
         tft.print(toolCurrents[i], 1); tft.print("A");
     }
