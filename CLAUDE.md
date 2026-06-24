@@ -55,11 +55,11 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 ### Future / Deferred
 
 **4. Bluetooth remote** *(deferred)*
-- Goal: handheld remote to open/close individual gates and toggle DC
-- **Note:** ESP8266MOD is WiFi-only — no Bluetooth. Two options:
-  - Use Giga's **built-in BLE** (ANNA-B112) — no extra hardware; pair a phone app or custom BLE peripheral
-  - Use an **ESP32** as the remote hardware (has BT + WiFi, runs on 3.3 V)
-- Decide on approach before implementation begins
+- Hardware confirmed: **ESP32-S3-WROOM-1** (BLE 5.0 + WiFi, 3.3 V)
+- Architecture: ESP32-S3 = BLE **peripheral** (advertises, battery-friendly); Giga = BLE **central** (scans/connects)
+- ESP32-S3 buttons → BLE notify with gate index (0–3) → Giga `handleButtonPress(value)`
+- Libraries: `NimBLE-Arduino` on ESP32-S3, `ArduinoBLE` on Giga (ANNA-B112 module)
+- Custom BLE service with one characteristic: gate command (uint8, notify)
 
 ## Libraries
 

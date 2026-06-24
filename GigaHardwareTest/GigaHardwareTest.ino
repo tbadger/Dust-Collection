@@ -90,13 +90,14 @@ void loop() {
     uint8_t    contacts;
     GDTpoint_t points[5];
 
-    if (touch.getTouchPoints(contacts, points) && contacts > 0) {
+    contacts = touch.getTouchPoints(points);
+    if (contacts > 0) {
         uint16_t rawX = points[0].x;
         uint16_t rawY = points[0].y;
 
         // Same mapping as main sketch: raw → landscape
-        int tx = rawY;
-        int ty = rawX;
+        int tx = (int)rawY;
+        int ty = 479 - (int)rawX;
 
         Serial.print("raw(");
         Serial.print(rawX);

@@ -318,23 +318,17 @@ void drawCurrentsRow() {
 static bool          touchActive = false;
 static unsigned long lastTouchMs = 0;
 
-// Remap GT911 raw coordinates to display pixel coordinates.
-// With tft.setRotation(1) (landscape), raw portrait coords (x up to 480, y up to 800)
-// need to be remapped. Adjust if touches are misaligned on hardware.
 void mapTouch(uint16_t rawX, uint16_t rawY, int& tx, int& ty) {
-    // Landscape: raw X → screen Y, raw Y → screen X (mirrored)
-    tx = rawY;
-    ty = rawX;
-    // If still misaligned, try:
-    //   tx = SCREEN_W - rawY;
-    //   ty = rawX;
+    tx = (int)rawY;
+    ty = (SCREEN_H - 1) - (int)rawX;
 }
 
 void handleTouch() {
     uint8_t    contacts;
     GDTpoint_t points[5];
 
-    if (touch.getTouchPoints(contacts, points) && contacts > 0) {
+    contacts = touch.getTouchPoints(points);
+    if (contacts > 0) {
         if (!touchActive && (millis() - lastTouchMs >= TOUCH_DEBOUNCE_MS)) {
             touchActive = true;
             lastTouchMs = millis();
