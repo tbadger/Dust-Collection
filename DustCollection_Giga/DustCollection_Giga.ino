@@ -19,13 +19,13 @@
 // ── WEB UI ───────────────────────────────────────────────────────────────────
 // Set WIFI_SSID / WIFI_PASS below. When connected, the display header shows the
 // IP address. Open http://<IP>/ in any browser to view graphs and edit settings.
-// Settings are held in RAM; they reset on power cycle.
-// TODO: persist toolThresholds and shutoffDelayMs to flash via KVStore.
+// Settings persist across reboots via mbed KVStore (onboard flash).
 
 #include <Arduino_GigaDisplay_GFX.h>
 #include <Arduino_GigaDisplayTouch.h>
 #include <WiFi.h>
 #include "EmonLib.h"
+#include "kvstore_global_api.h"
 
 // ── WiFi credentials ─────────────────────────────────────────────────────────
 // Edit arduino_secrets.h — never paste real credentials here
@@ -101,7 +101,7 @@ static const int SCREEN_H = 480;
 static const uint16_t C_BG       = 0x1082;
 static const uint16_t C_HEADER   = 0x000F;
 static const uint16_t C_WHITE    = 0xFFFF;
-static const uint16_t C_GATE_ON  = 0x07E0;
+static const uint16_t C_GATE_ON  = 0x0c47;
 static const uint16_t C_GATE_OFF = 0x4228;
 static const uint16_t C_DC_ON    = 0x0c47;
 static const uint16_t C_DC_OFF   = 0xdb64;
@@ -120,6 +120,14 @@ static const Rect GATE_BTN[NUM_TOOLS] = {
     {  0,   0,   0,   0},
 };
 static const Rect DC_BTN = {275, 385, 250, 80};
+
+// ── Flash persistence ─────────────────────────────────────────────────────────
+static const uint32_t SETTINGS_MAGIC = 0xDC001001;
+struct Settings {
+    uint32_t magic;
+    double   thresholds[NUM_TOOLS];
+    uint32_t shutoffMs;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Forward declarations
@@ -148,6 +156,8 @@ void handleMonitoringState();
 void handleToolActivatingState(unsigned long now);
 void handleToolRunningState();
 void handleToolDeactivatingState(unsigned long now);
+void loadSettings();
+void saveSettings();
 
 // ─────────────────────────────────────────────────────────────────────────────
 void setup() {
@@ -167,6 +177,7 @@ void setup() {
         sensors[i].current(A0 + i, EMON_CAL);
     }
 
+    loadSettings();
     setupWifi();
     
     tft.begin();
@@ -199,6 +210,35 @@ void loop() {
         case TOOL_RUNNING:       handleToolRunningState();          break;
         case TOOL_DEACTIVATING:  handleToolDeactivatingState(now);  break;
         case MANUAL_CONTROL:     break;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flash persistence
+// ─────────────────────────────────────────────────────────────────────────────
+void loadSettings() {
+    Settings s;
+    size_t actual = 0;
+    int rc = kv_get("/kv/dc_settings", &s, sizeof(s), &actual);
+    if (rc == MBED_SUCCESS && actual == sizeof(s) && s.magic == SETTINGS_MAGIC) {
+        for (int i = 0; i < NUM_TOOLS; i++) toolThresholds[i] = s.thresholds[i];
+        shutoffDelayMs = s.shutoffMs;
+        Serial.println("Settings loaded from flash.");
+    } else {
+        Serial.println("No saved settings — using defaults.");
+    }
+}
+
+void saveSettings() {
+    Settings s;
+    s.magic = SETTINGS_MAGIC;
+    for (int i = 0; i < NUM_TOOLS; i++) s.thresholds[i] = toolThresholds[i];
+    s.shutoffMs = (uint32_t)shutoffDelayMs;
+    int rc = kv_set("/kv/dc_settings", &s, sizeof(s), 0);
+    if (rc != MBED_SUCCESS) {
+        Serial.print("KVStore save failed: "); Serial.println(rc);
+    } else {
+        Serial.println("Settings saved to flash.");
     }
 }
 
@@ -261,8 +301,8 @@ void handleWebClient() {
     WiFiClient client = webServer.accept();
     if (!client) return;
 
-    unsigned long timeout = millis() + 1500;
-    while (!client.available() && millis() < timeout) {}
+    unsigned long timeout = millis() + 300;
+    while (!client.available() && millis() < timeout) { delay(1); }
     if (!client.available()) { client.stop(); return; }
 
     String requestLine = client.readStringUntil('\n');
@@ -504,6 +544,7 @@ void handleSavePost(WiFiClient& client, const String& body) {
             start = k + 1;
         }
     }
+    saveSettings();
     client.print("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK");
 }
 
