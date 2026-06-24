@@ -1,3 +1,6 @@
+# Secrets — never commit
+arduino_secrets.h
+
 # Arduino build artifacts
 *.o
 *.a
