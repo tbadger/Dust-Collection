@@ -103,10 +103,12 @@ static const uint16_t C_HEADER   = 0x000F;
 static const uint16_t C_WHITE    = 0xFFFF;
 static const uint16_t C_GATE_ON  = 0x07E0;
 static const uint16_t C_GATE_OFF = 0x4228;
-static const uint16_t C_DC_ON    = 0x07E0;
-static const uint16_t C_DC_OFF   = 0xF800;
+static const uint16_t C_DC_ON    = 0x0c47;
+static const uint16_t C_DC_OFF   = 0xdb64;
 static const uint16_t C_ACTIVE   = 0xFD20;
 static const uint16_t C_DISABLED = 0x2104;
+static const uint16_t C_STATUS   = 0x8db9;
+static const uint16_t C_CURRENT  = 0x4cfc;
 
 struct Rect { int16_t x, y, w, h; };
 
@@ -234,7 +236,7 @@ void setupWifi() {
 
 void drawWifiStatus() {
     tft.fillRect(470, 4, 326, 47, C_HEADER);
-    tft.setTextColor(C_WHITE);
+    tft.setTextColor(C_STATUS);
     if (wifiReady) {
         IPAddress ip = WiFi.localIP();
         char buf[20];
@@ -259,7 +261,7 @@ void handleWebClient() {
     WiFiClient client = webServer.accept();
     if (!client) return;
 
-    unsigned long timeout = millis() + 100;
+    unsigned long timeout = millis() + 1500;
     while (!client.available() && millis() < timeout) {}
     if (!client.available()) { client.stop(); return; }
 
@@ -559,9 +561,9 @@ void drawDCButton() {
 
 void drawStatusBar() {
     tft.fillRect(0, 60, 470, 35, C_BG);
-    tft.setTextSize(3);
-    tft.setTextColor(C_WHITE);
-    tft.setCursor(12, 68);
+    tft.setTextSize(2);
+    tft.setTextColor(C_STATUS);
+    tft.setCursor(14, 72);
     switch (currentState) {
         case STARTUP:           tft.print("Starting up...     "); break;
         case MONITORING:        tft.print("Monitoring         "); break;
@@ -577,7 +579,7 @@ void drawCurrentsRow() {
     tft.setTextSize(4);
     for (int i = 0; i < 3; i++) {
         bool over = toolCurrents[i] > toolThresholds[i];
-        tft.setTextColor(over ? C_ACTIVE : C_WHITE);
+        tft.setTextColor(over ? C_ACTIVE : C_CURRENT);
         tft.setCursor(10 + i * 270, 315);
         tft.print("T"); tft.print(i + 1); tft.print(":");
         tft.print(toolCurrents[i], 1); tft.print("A");
