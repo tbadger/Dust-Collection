@@ -81,11 +81,16 @@ static float         currentHistory[NUM_TOOLS][HISTORY_SAMPLES] = {};
 static int           historyHead  = 0;
 static unsigned long lastHistoryMs = 0;
 
-// ── Analytics ─────────────────────────────────────────────────────────────────
-static float         toolBaseline[NUM_TOOLS]     = {};  // EMA idle current
-static float         peakCurrent[NUM_TOOLS]      = {};  // peak since last activation
-static float         timeToPeak[NUM_TOOLS]        = {};  // seconds from detect to peak
-static unsigned long toolActivationMs[NUM_TOOLS]  = {};  // millis() at detection
+// ── Analytics / adaptive triggering ──────────────────────────────────────────
+// toolThresholds[] is now a DELTA above idle baseline, not an absolute value.
+// Requires hardware calibration — defaults are placeholders until sensors wired.
+struct ToolProfile {
+    float         baseline;     // EMA idle current (A)
+    float         peakCurrent;  // peak since last activation
+    float         timeToPeak;   // seconds from detect to peak
+    unsigned long activationMs; // millis() at detection
+};
+static ToolProfile tools[NUM_TOOLS] = {};
 
 // ── WiFi + web server ─────────────────────────────────────────────────────────
 static WiFiServer webServer(80);
@@ -177,8 +182,8 @@ void setup() {
         sensors[i].current(A0 + i, EMON_CAL);
     }
 
-    loadSettings();
     setupWifi();
+    loadSettings();
     
     tft.begin();
     tft.setRotation(1);
@@ -464,7 +469,7 @@ void serveIndexPage(WiFiClient& client) {
         "    ready=true;\n"
         "    var tf='';\n"
         "    for(var i=0;i<d.tools.length;i++){\n"
-        "      tf+='<div><label>'+N[i]+' threshold (A)</label>';\n"
+        "      tf+='<div><label>'+N[i]+' delta above idle (A)</label>';\n"
         "      tf+='<input type=\"number\" id=\"t'+i+'\" value=\"'+d.tools[i].threshold.toFixed(1)+'\" min=\"0\" max=\"500\" step=\"1\"></div>';\n"
         "    }\n"
         "    document.getElementById('tf').innerHTML=tf;\n"
@@ -512,9 +517,9 @@ void serveDataJson(WiFiClient& client) {
         if (i > 0) client.print(",");
         client.print("{\"current\":");    client.print(toolCurrents[i], 2);
         client.print(",\"threshold\":");  client.print(toolThresholds[i], 1);
-        client.print(",\"baseline\":");   client.print(toolBaseline[i], 2);
-        client.print(",\"peak\":");       client.print(peakCurrent[i], 2);
-        client.print(",\"peakTime\":");   client.print(timeToPeak[i], 2);
+        client.print(",\"baseline\":");   client.print(tools[i].baseline, 2);
+        client.print(",\"peak\":");       client.print(tools[i].peakCurrent, 2);
+        client.print(",\"peakTime\":");   client.print(tools[i].timeToPeak, 2);
         client.print("}");
     }
     client.print("],\"history\":[");
@@ -752,28 +757,30 @@ void updateHistory() {
 // State machine handlers
 // ─────────────────────────────────────────────────────────────────────────────
 void handleStartupState() {
-    // Wait for 3 full sensor round-robin cycles before trusting readings:
-    // 5 sensors × 100 ms each = 500 ms/cycle → 1500 ms total warm-up.
+    // Pre-warm baseline with fast EMA (α=0.1) before entering MONITORING.
+    // 30 samples at 100ms each = 3s → baseline reaches ~96% of true idle.
+    // Prevents delta detection firing against a near-zero baseline on first entry.
     static unsigned long startMs = millis();
-    if (millis() - startMs >= 1500UL) {
+    for (int i = 0; i < NUM_TOOLS; i++) {
+        tools[i].baseline = tools[i].baseline * 0.9f + (float)toolCurrents[i] * 0.1f;
+    }
+    if (millis() - startMs >= 3000UL) {
         currentState = MONITORING;
     }
 }
 
 void handleMonitoringState() {
-    // Update idle baseline (EMA) and check thresholds
     for (int i = 0; i < NUM_TOOLS; i++) {
-        toolBaseline[i] = toolBaseline[i] * 0.995f + (float)toolCurrents[i] * 0.005f;
+        tools[i].baseline = tools[i].baseline * 0.995f + (float)toolCurrents[i] * 0.005f;
 
-        if (toolCurrents[i] > toolThresholds[i]) {
+        if (toolCurrents[i] > tools[i].baseline + toolThresholds[i]) {
             gateOpen[i] = true;
             if (BLAST_GATE_PINS[i] >= 0) digitalWrite(BLAST_GATE_PINS[i], LOW);
             if (i < NUM_TOOLS - 1) drawGateButton(i);
 
-            // Start peak tracking for this tool
-            toolActivationMs[i] = millis();
-            peakCurrent[i]      = (float)toolCurrents[i];
-            timeToPeak[i]       = 0.0f;
+            tools[i].activationMs = millis();
+            tools[i].peakCurrent  = (float)toolCurrents[i];
+            tools[i].timeToPeak   = 0.0f;
 
             currentState = TOOL_ACTIVATING;
             stateTimer   = millis();
@@ -790,17 +797,16 @@ void handleToolActivatingState(unsigned long now) {
 }
 
 void handleToolRunningState() {
-    // Track peaks per tool
     for (int i = 0; i < NUM_TOOLS; i++) {
-        if (toolActivationMs[i] > 0 && (float)toolCurrents[i] > peakCurrent[i]) {
-            peakCurrent[i] = (float)toolCurrents[i];
-            timeToPeak[i]  = (millis() - toolActivationMs[i]) / 1000.0f;
+        if (tools[i].activationMs > 0 && (float)toolCurrents[i] > tools[i].peakCurrent) {
+            tools[i].peakCurrent = (float)toolCurrents[i];
+            tools[i].timeToPeak  = (millis() - tools[i].activationMs) / 1000.0f;
         }
     }
 
-    // Check if all tools dropped below 80% of threshold
+    // Tool off when current drops within 50% of delta threshold above baseline
     for (int i = 0; i < NUM_TOOLS; i++) {
-        if (toolCurrents[i] > (toolThresholds[i] * 0.8)) return;
+        if (toolCurrents[i] > tools[i].baseline + (toolThresholds[i] * 0.5)) return;
     }
     currentState = TOOL_DEACTIVATING;
     stateTimer   = millis();
@@ -808,7 +814,7 @@ void handleToolRunningState() {
 
 void handleToolDeactivatingState(unsigned long now) {
     for (int i = 0; i < NUM_TOOLS; i++) {
-        if (toolCurrents[i] > (toolThresholds[i] * 0.8)) {
+        if (toolCurrents[i] > tools[i].baseline + (toolThresholds[i] * 0.5)) {
             currentState = TOOL_RUNNING;
             return;
         }
@@ -818,7 +824,7 @@ void handleToolDeactivatingState(unsigned long now) {
         for (int i = 0; i < NUM_TOOLS; i++) {
             gateOpen[i] = false;
             if (BLAST_GATE_PINS[i] >= 0) digitalWrite(BLAST_GATE_PINS[i], HIGH);
-            toolActivationMs[i] = 0;  // allow baseline to resume
+            tools[i].activationMs = 0;
         }
         for (int i = 0; i < NUM_TOOLS - 1; i++) drawGateButton(i);
         currentState = MONITORING;
