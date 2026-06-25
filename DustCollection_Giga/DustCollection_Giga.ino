@@ -155,6 +155,7 @@ void setupWifi();
 void handleWebClient();
 void serveIndexPage(WiFiClient& client);
 void serveDataJson(WiFiClient& client);
+void serveStatusJson(WiFiClient& client);
 void handleSavePost(WiFiClient& client, const String& body);
 void handleStartupState();
 void handleMonitoringState();
@@ -330,6 +331,8 @@ void handleWebClient() {
         serveIndexPage(client);
     } else if (url == "/api/data") {
         serveDataJson(client);
+    } else if (url == "/api/status") {
+        serveStatusJson(client);
     } else if (url == "/api/save" && isPost && contentLen > 0) {
         String body = "";
         unsigned long bt = millis() + 100;
@@ -535,6 +538,27 @@ void serveDataJson(WiFiClient& client) {
     client.print("],\"shutoffSecs\":");
     client.print(shutoffDelayMs / 1000UL);
     client.print("}");
+}
+
+void serveStatusJson(WiFiClient& client) {
+    static const char* STATE_NAMES[] = {
+        "STARTUP","MONITORING","TOOL_ACTIVATING","TOOL_RUNNING","TOOL_DEACTIVATING","MANUAL_CONTROL"
+    };
+    client.print("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                 "Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
+    client.print("{\"state\":\""); client.print(STATE_NAMES[currentState]); client.print("\"");
+    client.print(",\"shutoffSecs\":"); client.print(shutoffDelayMs / 1000UL);
+    client.print(",\"tools\":[");
+    for (int i = 0; i < NUM_TOOLS; i++) {
+        if (i > 0) client.print(",");
+        client.print("{\"name\":\"");    client.print(TOOL_NAMES[i]);
+        client.print("\",\"current\":"); client.print(toolCurrents[i], 2);
+        client.print(",\"threshold\":"); client.print(toolThresholds[i], 1);
+        client.print(",\"baseline\":"); client.print(tools[i].baseline, 2);
+        client.print(",\"gateOpen\":"); client.print(gateOpen[i] ? "true" : "false");
+        client.print("}");
+    }
+    client.print("]}");
 }
 
 void handleSavePost(WiFiClient& client, const String& body) {
