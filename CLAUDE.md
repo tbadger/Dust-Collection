@@ -61,6 +61,10 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 - Libraries: `NimBLE-Arduino` on ESP32-S3, `ArduinoBLE` on Giga (ANNA-B112 module)
 - Custom BLE service with one characteristic: gate command (uint8, notify)
 
+**5. 1-button remote for tool 4** *(deferred)*
+- Single-button wireless remote dedicated to tool 4's gate (separate from the 24-button Everything Remote / BLE plan above)
+- Design TBD — pick integration path (WiFi direct like Everything Remote, or standalone BLE peripheral) when work starts
+
 ## Libraries
 
 `Libraries/` holds local copies used on Mega:
