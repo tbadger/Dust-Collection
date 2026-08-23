@@ -124,7 +124,7 @@ esp32_ble_server:
           read: true
           notify: true
           value:
-            data: [255]   # 255 = idle sentinel; 0-3 = gate index
+            data: 255   # 255 = idle sentinel; 0-3 = gate index
             type: uint8_t
 
 # LVGL UI
