@@ -7,7 +7,7 @@ esphome:
     # Idle brightness — screen starts dim, touch wakes it, toggling a gate
     # off dims it back down (see touchscreen on_touch and send_gate_command).
     then:
-      - light.turn_on: { id: backlight, brightness: 10% }
+      - light.turn_on: { id: backlight, brightness: 40% }
 
 esp32:
   variant: esp32   # Confirmed: board silkscreen reads ESP32-32E (plain
@@ -118,7 +118,7 @@ script:
           condition:
             lambda: 'return id(selected_gate) < 0;'
           then:
-            - light.turn_on: { id: backlight, brightness: 10% }
+            - light.turn_on: { id: backlight, brightness: 40% }
           else:
             - light.turn_on: { id: backlight, brightness: 100% }
       # Clear all four borders + label colors, then re-highlight whichever
