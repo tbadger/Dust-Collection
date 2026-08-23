@@ -79,13 +79,24 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
   is dropped entirely; `BLE_Remote_CYD/dust-collection-remote.yaml` is the
   complete config to flash. Only the hardware sections (esp32/spi/display/
   touchscreen pins) carried over — same physical board.
-- Giga side still a fragment, held as reference, not yet spliced into the
-  live sketch: `BLE_Remote_CYD/giga_ble_central_fragment.ino` — splice
-  points marked 1-7. Waiting on CYD flash before integration testing.
+- Giga side spliced into `DustCollection_Giga.ino` (2026-08-23) — not yet
+  hardware-tested against the flashed CYD.
 
 **5. 1-button remote for tool 4** *(deferred)*
 - Single-button wireless remote dedicated to tool 4's gate (separate from the 24-button Everything Remote / BLE plan above)
 - Design TBD — pick integration path (WiFi direct like Everything Remote, or standalone BLE peripheral) when work starts
+
+**6. LD2410C presence detection on the CYD remote** *(tabled)*
+- Goal: mmWave presence sensor auto-wakes/sleeps the CYD backlight (replace
+  or layer with the current touch-based `dim_backlight` timer)
+- Approach: ESPHome native `ld2410` component — UART (TX/RX, 5V, 256000
+  baud), exposes a `has_target` binary_sensor; `on_press`/`on_release` drive
+  `light.turn_on`/`light.turn_off` on `backlight`, same shape as existing
+  `on_touch` wake logic
+- Blocked on: which GPIOs are free on the board (only 14/13/12/15/2/33/36/27
+  are claimed so far — need 2 more for UART), 5V availability on the
+  exposed header, and whether touch-wake stays as a secondary trigger or
+  presence fully replaces it
 
 ## Open Tasks (as of 2026-08-23)
 
@@ -96,10 +107,10 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 - **Hardware bring-up test** of the just-committed startup grace period
   (`STARTUP_GRACE_MS`) and trigger debounce (`TRIGGER_DEBOUNCE_SAMPLES`) —
   written and wired but not yet run on real hardware.
-- **CYD flashed and confirmed working** (2026-08-23) with
-  `BLE_Remote_CYD/dust-collection-remote.yaml`. Remaining: splice
-  `giga_ble_central_fragment.ino` into `DustCollection_Giga.ino` and test
-  the BLE pair end-to-end — see item 4 above.
+- **BLE pair end-to-end test** — CYD flashed and confirmed working,
+  Giga-side `ArduinoBLE` code now spliced into `DustCollection_Giga.ino`
+  (needs the `ArduinoBLE` library installed). Not yet tested together on
+  real hardware — see item 4 above.
 - Roadmap item 5 (1-button remote, tool 4) remains deferred — see Planned
   Features above.
 

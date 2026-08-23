@@ -28,6 +28,7 @@
 #include <Arduino_GigaDisplay_GFX.h>
 #include <Arduino_GigaDisplayTouch.h>
 #include <WiFi.h>
+#include <ArduinoBLE.h>
 #include "EmonLib.h"
 #include "kvstore_global_api.h"
 
@@ -116,6 +117,14 @@ static ToolProfile tools[NUM_TOOLS] = {};
 static WiFiServer webServer(80);
 static bool       wifiReady = false;
 
+// ── BLE remote (CYD, see BLE_Remote_CYD/dust-collection-remote.yaml) ──────────
+// UUIDs must match the CYD's esp32_ble_server config exactly.
+static const char* CYD_SERVICE_UUID   = "5f2d958b-1564-4547-9566-64862169a9e4";
+static const char* GATE_CMD_CHAR_UUID = "3c711568-4467-44b3-9f0f-a7efb402c8ba";
+BLEDevice         cydRemote;
+BLECharacteristic gateCmdChar;
+bool              bleConnected = false;
+
 // ── Display & touch ───────────────────────────────────────────────────────────
 GigaDisplay_GFX          tft;
 Arduino_GigaDisplayTouch touch;
@@ -184,6 +193,8 @@ void handleToolRunningState();
 void handleToolDeactivatingState(unsigned long now);
 void loadSettings();
 void saveSettings();
+void setupBle();
+void handleBle();
 
 // ─────────────────────────────────────────────────────────────────────────────
 void setup() {
@@ -205,6 +216,7 @@ void setup() {
 
     setupWifi();
     loadSettings();
+    setupBle();
     
     tft.begin();
     tft.setRotation(1);
@@ -221,6 +233,7 @@ void loop() {
     handleTouch();
     updateSensors();
     updateHistory();
+    handleBle();
     if (wifiReady) handleWebClient();
 
     if (now - previousMillis >= DISPLAY_INTERVAL) {
@@ -795,6 +808,58 @@ void handleButtonPress(int idx) {
     }
 
     for (int i = 0; i < NUM_TOOLS - 1; i++) drawGateButton(i);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLE remote (CYD)
+// ─────────────────────────────────────────────────────────────────────────────
+void setupBle() {
+    if (!BLE.begin()) {
+        Serial.println("BLE.begin() failed — CYD remote will be unavailable");
+        return;
+    }
+    BLE.scanForUuid(CYD_SERVICE_UUID);
+}
+
+void handleBle() {
+    if (!bleConnected) {
+        BLEDevice peripheral = BLE.available();
+        if (!peripheral) return;
+
+        BLE.stopScan();
+
+        bool ok = peripheral.connect() && peripheral.discoverAttributes();
+        if (ok) {
+            gateCmdChar = peripheral.characteristic(GATE_CMD_CHAR_UUID);
+            ok = gateCmdChar && gateCmdChar.canSubscribe() && gateCmdChar.subscribe();
+        }
+
+        if (ok) {
+            cydRemote    = peripheral;
+            bleConnected = true;
+            Serial.println("CYD remote connected");
+        } else {
+            if (peripheral.connected()) peripheral.disconnect();
+            BLE.scanForUuid(CYD_SERVICE_UUID); // retry
+        }
+        return;
+    }
+
+    // Connected: drop out and rescan if the link died
+    if (!cydRemote.connected()) {
+        bleConnected = false;
+        Serial.println("CYD remote disconnected — rescanning");
+        BLE.scanForUuid(CYD_SERVICE_UUID);
+        return;
+    }
+
+    if (gateCmdChar.valueUpdated()) {
+        uint8_t idx = 0;
+        gateCmdChar.readValue(idx);
+        if (idx <= 3) {              // 255 = idle sentinel from CYD, ignore
+            handleButtonPress((int)idx);
+        }
+    }
 }
 
 bool areAllGatesClosed() {
