@@ -55,9 +55,10 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 ### Future / Deferred
 
 **4. Bluetooth remote** *(deferred)*
-- Hardware: repurposed **cheap yellow display (CYD)** — ESP32 or ESP32-S3 variant
-  (confirm which chip on the specific board), already running ESPHome for other
-  features. Replaces the previously-planned dedicated ESP32-S3-WROOM-1 module.
+- Hardware: repurposed **cheap yellow display (CYD)** — confirmed
+  **ESP32-3248S035C**, ESP32-S3, 3.5" 480×320 ST7796 capacitive touch,
+  BLE 5.0 + WiFi — already running ESPHome for other features. Replaces the
+  previously-planned dedicated ESP32-S3-WROOM-1 module.
 - Architecture: CYD = BLE **peripheral** (advertises); Giga = BLE **central**
   (scans/connects) — role assignment unchanged
 - Firmware split:
