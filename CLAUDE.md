@@ -62,25 +62,43 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
   ESP32-S3-WROOM-1 module. (Note: the eBay/Amazon listing text said
   "ESP32-S3... capacitive touch" — that was wrong; trust the board's own
   silkscreen over listing copy.)
-- Architecture: CYD = BLE **peripheral** (advertises); Giga = BLE **central**
-  (scans/connects) — role assignment unchanged
+- **Architecture (2026-08-23, role swap from original plan): Giga = BLE
+  peripheral (advertises), CYD = BLE central (connects/writes).** Original
+  plan had it the other way; flipped after debugging — see "Debugging
+  history" below for why.
 - Firmware split:
-  - CYD side: ESPHome `esp32_ble_server` component, custom service with one
-    notify characteristic (uint8 gate index 0–3). Existing screen's tool
-    buttons get `on_press:` automations that set the characteristic value and
-    notify. Runs alongside CYD's existing WiFi/other features.
-  - Giga side: `ArduinoBLE` (ANNA-B112 module) — scan for CYD's service UUID,
-    connect, subscribe to characteristic, feed notified value into
-    `handleButtonPress(value)`
-- Gotcha: WiFi/BLE radio coexistence on CYD — fine for this low-traffic use,
-  but worth watching if other CYD features are latency-sensitive
-- CYD side is a full replacement config, not a merge: the board's previous
-  job (man-cave-mini-dash — outdoor/shop temp, A/C control, 3D print status)
-  is dropped entirely; `BLE_Remote_CYD/dust-collection-remote.yaml` is the
-  complete config to flash. Only the hardware sections (esp32/spi/display/
-  touchscreen pins) carried over — same physical board.
-- Giga side spliced into `DustCollection_Giga.ino` (2026-08-23) — not yet
-  hardware-tested against the flashed CYD.
+  - Giga side: `ArduinoBLE` peripheral mode in `DustCollection_Giga.ino` —
+    advertises as local name `"DustCollection"`, one writable/notifiable
+    characteristic (uint8 gate index 0–3, sentinel 255 = idle).
+    `handleBle()` polls `gateCmdChar.written()` each loop and feeds the
+    value into the existing `handleButtonPress(value)` — same path the
+    touchscreen uses.
+  - CYD side: ESPHome `esp32_ble_tracker` + `ble_client` (connects by MAC
+    address, `auto_connect: true`), tool buttons' `on_click` call
+    `ble_client.ble_write` with the gate index. See
+    `BLE_Remote_CYD/dust-collection-remote.yaml`.
+  - CYD side is a full replacement config, not a merge: the board's
+    previous job (man-cave-mini-dash — outdoor/shop temp, A/C control, 3D
+    print status) is dropped entirely.
+- Gotcha: `ble_client`'s `mac_address` is hardcoded to the Giga's BLE
+  address (captured from its own Serial log). If the Giga's BLE address
+  ever changes (re-flash of a different ArduinoBLE version, hardware swap),
+  this needs updating on the CYD side too.
+- **Debugging history:** original plan (CYD peripheral, Giga central) got
+  as far as Giga finding the CYD's advertisement and matching its service
+  UUID, but `peripheral.connect()` failed every attempt. `BLE.debug(Serial)`
+  HCI trace showed the connect command was accepted by the controller, but
+  the link-layer connection never completed — timed out and self-cancelled
+  every time. Ruled out: WiFi/BLE radio contention (tested both sides off),
+  module firmware version (already at latest for this board — the
+  "firmware 3.0.0+" fix that applies to other Nina-based boards doesn't
+  apply here), BLE address type mismatch, signal strength. Found a matching
+  unresolved bug report:
+  [ArduinoBLE#329](https://github.com/arduino-libraries/ArduinoBLE/issues/329)
+  (same symptom, closed "not planned", no fix). Confirmed Giga's BLE
+  peripheral mode and hardware are fine (connected cleanly to a phone's
+  nRF Connect app), so central duty moved to the CYD instead — ESP32's
+  central stack is far more battle-tested for this direction.
 
 **5. 1-button remote for tool 4** *(deferred)*
 - Single-button wireless remote dedicated to tool 4's gate (separate from the 24-button Everything Remote / BLE plan above)
@@ -107,10 +125,9 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 - **Hardware bring-up test** of the just-committed startup grace period
   (`STARTUP_GRACE_MS`) and trigger debounce (`TRIGGER_DEBOUNCE_SAMPLES`) —
   written and wired but not yet run on real hardware.
-- **BLE pair end-to-end test** — CYD flashed and confirmed working,
-  Giga-side `ArduinoBLE` code now spliced into `DustCollection_Giga.ino`
-  (needs the `ArduinoBLE` library installed). Not yet tested together on
-  real hardware — see item 4 above.
+- ~~BLE pair end-to-end test~~ — **confirmed working (2026-08-23)** after
+  the role swap (Giga = peripheral, CYD = central via `ble_client`). See
+  item 4 above for the full debugging trail.
 - Roadmap item 5 (1-button remote, tool 4) remains deferred — see Planned
   Features above.
 

@@ -118,12 +118,18 @@ static WiFiServer webServer(80);
 static bool       wifiReady = false;
 
 // ── BLE remote (CYD, see BLE_Remote_CYD/dust-collection-remote.yaml) ──────────
-// UUIDs must match the CYD's esp32_ble_server config exactly.
+// Giga is the BLE PERIPHERAL here, CYD is the CENTRAL (role swap from the
+// original plan — ArduinoBLE central mode on Giga has an unresolved
+// connect() bug against non-Arduino peripherals, see
+// github.com/arduino-libraries/ArduinoBLE/issues/329. Giga's peripheral
+// mode tested clean against nRF Connect, so central duty moved to the CYD's
+// ESPHome ble_client component instead. UUIDs must match the CYD's
+// ble_client config exactly.
 static const char* CYD_SERVICE_UUID   = "5f2d958b-1564-4547-9566-64862169a9e4";
 static const char* GATE_CMD_CHAR_UUID = "3c711568-4467-44b3-9f0f-a7efb402c8ba";
-BLEDevice         cydRemote;
-BLECharacteristic gateCmdChar;
-bool              bleConnected = false;
+BLEService            gateService(CYD_SERVICE_UUID);
+BLEByteCharacteristic gateCmdChar(GATE_CMD_CHAR_UUID, BLERead | BLEWrite | BLENotify);
+bool                  bleConnected = false;
 
 // ── Display & touch ───────────────────────────────────────────────────────────
 GigaDisplay_GFX          tft;
@@ -811,51 +817,43 @@ void handleButtonPress(int idx) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BLE remote (CYD)
+// BLE remote (CYD) — Giga is the peripheral, CYD connects in as central
 // ─────────────────────────────────────────────────────────────────────────────
 void setupBle() {
     if (!BLE.begin()) {
         Serial.println("BLE.begin() failed — CYD remote will be unavailable");
         return;
     }
-    BLE.scanForUuid(CYD_SERVICE_UUID);
+
+    BLE.setLocalName("DustCollection");
+    BLE.setAdvertisedService(gateService);
+    gateService.addCharacteristic(gateCmdChar);
+    BLE.addService(gateService);
+    gateCmdChar.writeValue((uint8_t)255); // idle sentinel until CYD writes a real command
+    BLE.advertise();
+
+    Serial.print("BLE advertising as 'DustCollection', address ");
+    Serial.println(BLE.address());
 }
 
 void handleBle() {
-    if (!bleConnected) {
-        BLEDevice peripheral = BLE.available();
-        if (!peripheral) return;
+    // Non-blocking: BLE.central() also pumps the BLE stack each call, so
+    // this must run every loop() iteration rather than only when connected.
+    BLEDevice central = BLE.central();
 
-        BLE.stopScan();
-
-        bool ok = peripheral.connect() && peripheral.discoverAttributes();
-        if (ok) {
-            gateCmdChar = peripheral.characteristic(GATE_CMD_CHAR_UUID);
-            ok = gateCmdChar && gateCmdChar.canSubscribe() && gateCmdChar.subscribe();
-        }
-
-        if (ok) {
-            cydRemote    = peripheral;
-            bleConnected = true;
-            Serial.println("CYD remote connected");
+    bool isConnected = central;
+    if (isConnected != bleConnected) {
+        bleConnected = isConnected;
+        if (isConnected) {
+            Serial.print("CYD connected: ");
+            Serial.println(central.address());
         } else {
-            if (peripheral.connected()) peripheral.disconnect();
-            BLE.scanForUuid(CYD_SERVICE_UUID); // retry
+            Serial.println("CYD disconnected");
         }
-        return;
     }
 
-    // Connected: drop out and rescan if the link died
-    if (!cydRemote.connected()) {
-        bleConnected = false;
-        Serial.println("CYD remote disconnected — rescanning");
-        BLE.scanForUuid(CYD_SERVICE_UUID);
-        return;
-    }
-
-    if (gateCmdChar.valueUpdated()) {
-        uint8_t idx = 0;
-        gateCmdChar.readValue(idx);
+    if (gateCmdChar.written()) {
+        uint8_t idx = gateCmdChar.value();
         if (idx <= 3) {              // 255 = idle sentinel from CYD, ignore
             handleButtonPress((int)idx);
         }

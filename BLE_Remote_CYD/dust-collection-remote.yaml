@@ -15,8 +15,10 @@ esp32:
 logger:
 
 # Enable Home Assistant API (kept — useful for OTA/monitoring even though
-# the remote's main job is BLE, not WiFi. WiFi + BLE coexist fine on this
-# radio for our low-traffic use — see CLAUDE.md item 4 gotcha.)
+# the remote's main job is BLE, not WiFi. Confirmed WiFi+BLE coexistence
+# was NOT the connect() blocker — see CLAUDE.md item 4 for the debugging
+# trail; root cause was an unresolved ArduinoBLE central-mode bug on the
+# Giga, fixed by swapping roles so the CYD is the BLE central instead.)
 api:
 
 # Allow Over-The-Air updates
@@ -89,17 +91,18 @@ script:
           id: backlight
           brightness: 50%
 
-  # One parameterized script for all 4 gate buttons — see
-  # BLE_Remote_CYD/giga_ble_central_fragment.ino for the Giga-side receiver.
+  # One parameterized script for all 4 gate buttons — CYD is the BLE
+  # CENTRAL here (role swap — see CLAUDE.md item 4). Writes the gate index
+  # straight to the Giga's characteristic instead of notifying subscribers.
   - id: send_gate_command
     parameters:
       gate_index: int
     then:
-      - ble_server.characteristic.set_value:
-          id: gate_cmd_char
+      - ble_client.ble_write:
+          id: giga_ble
+          service_uuid: "5f2d958b-1564-4547-9566-64862169a9e4"
+          characteristic_uuid: "3c711568-4467-44b3-9f0f-a7efb402c8ba"
           value: !lambda 'return std::vector<uint8_t>{(uint8_t) gate_index};'
-      - ble_server.characteristic.notify:
-          id: gate_cmd_char
       - lvgl.label.update:
           id: status_label
           text: !lambda |-
@@ -108,24 +111,17 @@ script:
             s += names[gate_index];
             return s;
 
-# BLE peripheral — Giga (central, via ArduinoBLE) scans for this service,
-# subscribes to gate_cmd_char, and calls handleButtonPress() on notify.
-# UUIDs must match giga_ble_central_fragment.ino exactly.
-esp32_ble_server:
-  manufacturer: "DustCollection"
-  model: "CYD Remote"
-  services:
-    - uuid: "5f2d958b-1564-4547-9566-64862169a9e4"
-      advertise: true
-      characteristics:
-        - id: gate_cmd_char
-          uuid: "3c711568-4467-44b3-9f0f-a7efb402c8ba"
-          description: "Gate command"
-          read: true
-          notify: true
-          value:
-            data: 255   # 255 = idle sentinel; 0-3 = gate index
-            type: uint8_t
+# BLE central — CYD connects out to the Giga's peripheral advertisement
+# (local name "DustCollection") and writes the gate index directly.
+# MAC address is the Giga's fixed BLE address (captured from its own
+# Serial log at BLE.begin() — confirm it hasn't changed if this stops
+# connecting). UUIDs must match DustCollection_Giga.ino exactly.
+esp32_ble_tracker:
+
+ble_client:
+  - mac_address: "A8:61:0A:40:62:08"
+    id: giga_ble
+    auto_connect: true
 
 # LVGL UI
 lvgl:
@@ -245,8 +241,8 @@ lvgl:
 
 # Binary sensors
 binary_sensor:
-  # API/HA connection state - drives wifi icon color (kept from mini-dash,
-  # useful for confirming the board's online for OTA/logs)
+  # API/HA connection state - drives wifi icon color (useful for confirming
+  # the board's online for OTA/logs)
   - platform: status
     id: api_connected
     on_press:
