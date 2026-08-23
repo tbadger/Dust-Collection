@@ -100,13 +100,10 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
   nRF Connect app), so central duty moved to the CYD instead — ESP32's
   central stack is far more battle-tested for this direction.
 
-**5. 1-button remote for tool 4** *(deferred)*
-- Single-button wireless remote dedicated to tool 4's gate (separate from the 24-button Everything Remote / BLE plan above)
-- Design TBD — pick integration path (WiFi direct like Everything Remote, or standalone BLE peripheral) when work starts
-
-**6. LD2410C presence detection on the CYD remote** *(tabled)*
-- Goal: mmWave presence sensor auto-wakes/sleeps the CYD backlight (replace
-  or layer with the current touch-based `dim_backlight` timer)
+**5. LD2410C presence detection on the CYD remote** *(tabled)*
+- Goal: mmWave presence sensor auto-wakes/sleeps the CYD backlight (layer
+  with the current touch/route-driven brightness — 40% idle, 100% on
+  touch, back to 40% when a gate toggles off)
 - Approach: ESPHome native `ld2410` component — UART (TX/RX, 5V, 256000
   baud), exposes a `has_target` binary_sensor; `on_press`/`on_release` drive
   `light.turn_on`/`light.turn_off` on `backlight`, same shape as existing
@@ -128,8 +125,8 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 - ~~BLE pair end-to-end test~~ — **confirmed working (2026-08-23)** after
   the role swap (Giga = peripheral, CYD = central via `ble_client`). See
   item 4 above for the full debugging trail.
-- Roadmap item 5 (1-button remote, tool 4) remains deferred — see Planned
-  Features above.
+- Roadmap item 5 (LD2410C presence detection on the CYD remote) remains
+  tabled — see Planned Features above.
 
 ## Libraries
 
