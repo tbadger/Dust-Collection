@@ -55,11 +55,21 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 ### Future / Deferred
 
 **4. Bluetooth remote** *(deferred)*
-- Hardware confirmed: **ESP32-S3-WROOM-1** (BLE 5.0 + WiFi, 3.3 V)
-- Architecture: ESP32-S3 = BLE **peripheral** (advertises, battery-friendly); Giga = BLE **central** (scans/connects)
-- ESP32-S3 buttons → BLE notify with gate index (0–3) → Giga `handleButtonPress(value)`
-- Libraries: `NimBLE-Arduino` on ESP32-S3, `ArduinoBLE` on Giga (ANNA-B112 module)
-- Custom BLE service with one characteristic: gate command (uint8, notify)
+- Hardware: repurposed **cheap yellow display (CYD)** — ESP32 or ESP32-S3 variant
+  (confirm which chip on the specific board), already running ESPHome for other
+  features. Replaces the previously-planned dedicated ESP32-S3-WROOM-1 module.
+- Architecture: CYD = BLE **peripheral** (advertises); Giga = BLE **central**
+  (scans/connects) — role assignment unchanged
+- Firmware split:
+  - CYD side: ESPHome `esp32_ble_server` component, custom service with one
+    notify characteristic (uint8 gate index 0–3). Existing screen's tool
+    buttons get `on_press:` automations that set the characteristic value and
+    notify. Runs alongside CYD's existing WiFi/other features.
+  - Giga side: `ArduinoBLE` (ANNA-B112 module) — scan for CYD's service UUID,
+    connect, subscribe to characteristic, feed notified value into
+    `handleButtonPress(value)`
+- Gotcha: WiFi/BLE radio coexistence on CYD — fine for this low-traffic use,
+  but worth watching if other CYD features are latency-sensitive
 
 **5. 1-button remote for tool 4** *(deferred)*
 - Single-button wireless remote dedicated to tool 4's gate (separate from the 24-button Everything Remote / BLE plan above)
