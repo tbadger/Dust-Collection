@@ -65,6 +65,20 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 - Single-button wireless remote dedicated to tool 4's gate (separate from the 24-button Everything Remote / BLE plan above)
 - Design TBD — pick integration path (WiFi direct like Everything Remote, or standalone BLE peripheral) when work starts
 
+## Open Tasks (as of 2026-08-23)
+
+- **Fill in real per-channel `EMON_CAL[]` values.** Currently all 5 entries
+  are still the Mega's shared `111.1` placeholder. Run
+  `DustCollection_Giga/Calibration/Calibration.ino` (clamp meter against raw
+  `ICAL=1` readings) and paste results into `DustCollection_Giga.ino`.
+- **Hardware bring-up test** of the just-committed startup grace period
+  (`STARTUP_GRACE_MS`) and trigger debounce (`TRIGGER_DEBOUNCE_SAMPLES`) —
+  written and wired but not yet run on real hardware.
+- **Push to origin** — local `master` is ahead of `origin/master` (6 commits
+  as of this writing); not yet pushed.
+- Roadmap items 4 (BLE remote) and 5 (1-button remote, tool 4) remain
+  deferred — see Planned Features above.
+
 ## Libraries
 
 `Libraries/` holds local copies used on Mega:
