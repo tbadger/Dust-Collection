@@ -96,9 +96,10 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 - **Hardware bring-up test** of the just-committed startup grace period
   (`STARTUP_GRACE_MS`) and trigger debounce (`TRIGGER_DEBOUNCE_SAMPLES`) —
   written and wired but not yet run on real hardware.
-- **Flash CYD with `BLE_Remote_CYD/dust-collection-remote.yaml`**, then
-  splice `giga_ble_central_fragment.ino` into `DustCollection_Giga.ino` and
-  test the pair end-to-end — see item 4 above.
+- **CYD flashed and confirmed working** (2026-08-23) with
+  `BLE_Remote_CYD/dust-collection-remote.yaml`. Remaining: splice
+  `giga_ble_central_fragment.ino` into `DustCollection_Giga.ino` and test
+  the BLE pair end-to-end — see item 4 above.
 - Roadmap item 5 (1-button remote, tool 4) remains deferred — see Planned
   Features above.
 
