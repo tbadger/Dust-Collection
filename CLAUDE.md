@@ -55,10 +55,13 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 ### Future / Deferred
 
 **4. Bluetooth remote** *(deferred)*
-- Hardware: repurposed **cheap yellow display (CYD)** — confirmed
-  **ESP32-3248S035C**, ESP32-S3, 3.5" 480×320 ST7796 capacitive touch,
-  BLE 5.0 + WiFi — already running ESPHome for other features. Replaces the
-  previously-planned dedicated ESP32-S3-WROOM-1 module.
+- Hardware: repurposed **cheap yellow display (CYD)** — confirmed via board
+  silkscreen: **ESP32-32E** (plain ESP32-WROOM-32E, not S3), 3.5" 320×480
+  ST7796, resistive touch (xpt2046), BLE 4.2 + WiFi — already running
+  ESPHome for other features. Replaces the previously-planned dedicated
+  ESP32-S3-WROOM-1 module. (Note: the eBay/Amazon listing text said
+  "ESP32-S3... capacitive touch" — that was wrong; trust the board's own
+  silkscreen over listing copy.)
 - Architecture: CYD = BLE **peripheral** (advertises); Giga = BLE **central**
   (scans/connects) — role assignment unchanged
 - Firmware split:
@@ -71,11 +74,14 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
     `handleButtonPress(value)`
 - Gotcha: WiFi/BLE radio coexistence on CYD — fine for this low-traffic use,
   but worth watching if other CYD features are latency-sensitive
-- Draft code for both sides written and held as reference (not yet spliced
-  into the live sketches — waiting on CYD hardware flash before integration):
-  `BLE_Remote_CYD/ble_server_fragment.yaml` (CYD/ESPHome) and
-  `BLE_Remote_CYD/giga_ble_central_fragment.ino` (Giga/ArduinoBLE). Splice
-  points marked 1-7 in the `.ino` fragment.
+- CYD side is a full replacement config, not a merge: the board's previous
+  job (man-cave-mini-dash — outdoor/shop temp, A/C control, 3D print status)
+  is dropped entirely; `BLE_Remote_CYD/dust-collection-remote.yaml` is the
+  complete config to flash. Only the hardware sections (esp32/spi/display/
+  touchscreen pins) carried over — same physical board.
+- Giga side still a fragment, held as reference, not yet spliced into the
+  live sketch: `BLE_Remote_CYD/giga_ble_central_fragment.ino` — splice
+  points marked 1-7. Waiting on CYD flash before integration testing.
 
 **5. 1-button remote for tool 4** *(deferred)*
 - Single-button wireless remote dedicated to tool 4's gate (separate from the 24-button Everything Remote / BLE plan above)
@@ -90,9 +96,9 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 - **Hardware bring-up test** of the just-committed startup grace period
   (`STARTUP_GRACE_MS`) and trigger debounce (`TRIGGER_DEBOUNCE_SAMPLES`) —
   written and wired but not yet run on real hardware.
-- **Flash CYD with `BLE_Remote_CYD/ble_server_fragment.yaml`**, then splice
-  `giga_ble_central_fragment.ino` into `DustCollection_Giga.ino` and test the
-  pair end-to-end — see item 4 above.
+- **Flash CYD with `BLE_Remote_CYD/dust-collection-remote.yaml`**, then
+  splice `giga_ble_central_fragment.ino` into `DustCollection_Giga.ino` and
+  test the pair end-to-end — see item 4 above.
 - Roadmap item 5 (1-button remote, tool 4) remains deferred — see Planned
   Features above.
 
