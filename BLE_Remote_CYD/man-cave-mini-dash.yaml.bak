@@ -1,0 +1,416 @@
+# ── ARCHIVED: original ESPHome config for this CYD board, before it was ──
+# repurposed as the dust-collection BLE remote (2026-08-23). Kept here only
+# as a reference/restore point — not built or maintained. See
+# BLE_Remote_CYD/dust-collection-remote.yaml for the active config.
+#
+# Original job: "Man Cave Mini Dash" — outdoor/shop temperature display,
+# Mr. Cool A/C control popup, Bambu P1S print status. Pulled data from Home
+# Assistant over the API; this file was never tracked in git before now —
+# recovered from the pasted config text during the repurposing conversation.
+
+esphome:
+  name: man-cave-mini-dash
+  friendly_name: Man Cave Mini Dash
+  min_version: 2026.4.0
+  name_add_mac_suffix: false
+
+esp32:
+  variant: esp32
+  framework:
+    type: esp-idf
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+
+# Allow Over-The-Air updates
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# SPI Bus
+spi:
+  clk_pin: GPIO14
+  mosi_pin: GPIO13
+  miso_pin: GPIO12
+
+# ST7796 Display
+display:
+  - platform: mipi_spi
+    model: ST7796
+    cs_pin: GPIO15
+    dc_pin: GPIO2
+    invert_colors: false
+    rotation: 0
+    id: my_display
+
+# Fonts
+font:
+  - file: "gfonts://Roboto"
+    id: roboto_72
+    size: 72
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: roboto_48
+    size: 48
+    bpp: 4
+
+# LVGL UI
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  bg_color: 0x000000
+  default_font: roboto_72
+  pages:
+    - id: main_page
+      bg_color: 0x000000
+      widgets:
+        # Outdoor Temperature - top third
+        - obj:
+            id: outdoor_rect
+            x: 8
+            y: 8
+            width: 304
+            height: 149
+            radius: 10
+            bg_color: 0x000000
+            border_width: 0
+            pad_all: 0
+            widgets:
+              - label:
+                  id: outdoor_title
+                  text: "Outdoor Temp"
+                  align: TOP_MID
+                  y: 10
+                  text_font: montserrat_24
+                  text_color: 0x000000
+              - label:
+                  id: wifi_icon
+                  text: ""
+                  align: TOP_LEFT
+                  x: 6
+                  y: 6
+                  text_font: montserrat_20
+                  text_color: 0xC62828
+              - label:
+                  id: outdoor_temp_label
+                  text: "--°F"
+                  align: CENTER
+                  y: 14
+                  text_font: roboto_72
+                  text_color: 0x4CAF50
+        # Shop Temperature - middle third (tap to open A/C popup)
+        - obj:
+            id: shop_rect
+            x: 8
+            y: 165
+            width: 304
+            height: 150
+            radius: 10
+            bg_color: 0x2E7D32
+            border_width: 0
+            pad_all: 0
+            clickable: true
+            on_click:
+              - lvgl.page.show: shop_ac_page
+            widgets:
+              - label:
+                  id: shop_title
+                  text: "Shop Temp"
+                  align: TOP_MID
+                  y: 10
+                  text_font: montserrat_24
+                  text_color: 0x000000
+              - label:
+                  id: shop_temp_label
+                  text: "--°F"
+                  align: CENTER
+                  y: 14
+                  text_font: roboto_72
+                  text_color: 0x000000
+        # Print Time - bottom third
+        - obj:
+            id: print_rect
+            x: 8
+            y: 323
+            width: 304
+            height: 149
+            radius: 10
+            bg_color: 0x2196F3
+            border_width: 0
+            pad_all: 0
+            widgets:
+              - label:
+                  id: print_title
+                  text: "P1S Print Status"
+                  align: TOP_MID
+                  y: 10
+                  text_font: montserrat_24
+                  text_color: 0x000000
+              - label:
+                  id: print_time_label
+                  text: "IDLE"
+                  align: CENTER
+                  y: 14
+                  text_font: roboto_72
+                  text_color: 0x000000
+    # Popup: Shop A/C control
+    - id: shop_ac_page
+      bg_color: 0x000000
+      widgets:
+        - label:
+            id: shop_ac_state_label
+            text: "Mr. Cool: --"
+            align: TOP_MID
+            y: 18
+            text_font: montserrat_32
+            text_color: 0xFFEA00
+        - button:
+            id: shop_ac_on_btn
+            align: CENTER
+            y: -60
+            width: 260
+            height: 90
+            bg_color: 0x4CAF50
+            radius: 12
+            on_click:
+              - homeassistant.action:
+                  action: climate.set_hvac_mode
+                  data:
+                    entity_id: climate.shop_shop_mr_cool_air_conditioner
+                    hvac_mode: cool
+              - lvgl.page.show: main_page
+            widgets:
+              - label:
+                  text: "ON"
+                  align: CENTER
+                  text_font: roboto_72
+                  text_color: 0xFFFFFF
+        - button:
+            id: shop_ac_off_btn
+            align: CENTER
+            y: 50
+            width: 260
+            height: 90
+            bg_color: 0xF44336
+            radius: 12
+            on_click:
+              - homeassistant.action:
+                  action: climate.set_hvac_mode
+                  data:
+                    entity_id: climate.shop_shop_mr_cool_air_conditioner
+                    hvac_mode: "off"
+              - lvgl.page.show: main_page
+            widgets:
+              - label:
+                  text: "OFF"
+                  align: CENTER
+                  text_font: roboto_72
+                  text_color: 0xFFFFFF
+        - button:
+            id: shop_ac_cancel_btn
+            align: CENTER
+            y: 170
+            width: 260
+            height: 60
+            bg_color: 0x424242
+            radius: 12
+            on_click:
+              - lvgl.page.show: main_page
+            widgets:
+              - label:
+                  text: "Cancel"
+                  align: CENTER
+                  text_font: roboto_48
+                  text_color: 0xFFFFFF
+
+# Touchscreen
+touchscreen:
+  - platform: xpt2046
+    id: my_touch
+    cs_pin: GPIO33
+    interrupt_pin: GPIO36
+    update_interval: 50ms
+    calibration:
+      x_min: 200
+      x_max: 3800
+      y_min: 200
+      y_max: 3800
+    transform:
+      mirror_y: true
+    on_touch:
+      - light.turn_on:
+          id: backlight
+          brightness: 100%
+      - script.execute: dim_backlight
+
+# Scripts
+script:
+  - id: dim_backlight
+    mode: restart
+    then:
+      - delay: 2min
+      - if:
+          condition:
+            lambda: |-
+              return id(print_remaining).state <= 0 && id(bed_temperature).state <= 28;
+          then:
+            - light.turn_on:
+                id: backlight
+                brightness: 50%
+
+# Outputs
+output:
+  - platform: ledc
+    pin: GPIO27
+    id: backlight_output
+
+# Lights
+light:
+  - platform: monochromatic
+    output: backlight_output
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: ALWAYS_ON
+
+# HA Sensors
+sensor:
+  # Outdoor temperature - drives top rectangle
+  - platform: homeassistant
+    id: outdoor_temperature
+    entity_id: sensor.home_back_yard_badweather_outdoor_temperature
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: outdoor_temp_label
+            text: !lambda |-
+              if (isnan(x)) return std::string("--°F");
+              char buf[10];
+              snprintf(buf, sizeof(buf), "%.0f°F", x);
+              return std::string(buf);
+            text_color: !lambda |-
+              if (x > 100.0f) return lv_color_hex(0xFFFFFF);
+              if (x > 79.0f)  return lv_color_hex(0x000000);
+              return lv_color_hex(0x4CAF50);
+        - lvgl.widget.update:
+            id: outdoor_rect
+            bg_color: !lambda |-
+              if (x > 100.0f) return lv_color_hex(0xC62828);
+              if (x > 90.0f)  return lv_color_hex(0xEF6C00);
+              if (x > 79.0f)  return lv_color_hex(0xFFB300);
+              return lv_color_hex(0x000000);
+  # Shop temperature - drives middle rectangle
+  - platform: homeassistant
+    id: shop_temperature
+    entity_id: sensor.h5075_62a4_temperature
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: shop_temp_label
+            text: !lambda |-
+              if (isnan(x)) return std::string("--°F");
+              char buf[10];
+              snprintf(buf, sizeof(buf), "%.0f°F", x);
+              return std::string(buf);
+            text_color: 0x000000
+        - lvgl.widget.update:
+            id: shop_rect
+            bg_color: !lambda |-
+              if (x > 100.0f) return lv_color_hex(0xC62828);
+              if (x > 90.0f)  return lv_color_hex(0xEF6C00);
+              if (x > 79.0f)  return lv_color_hex(0xFFB300);
+              return lv_color_hex(0x2E7D32);
+  # Print time remaining - drives bottom rectangle
+  - platform: homeassistant
+    id: print_remaining
+    entity_id: sensor.badp1s_remaining_time
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: print_time_label
+            text: !lambda |-
+              if (isnan(x) || x <= 0) return std::string("IDLE");
+              return std::to_string((int)x);
+            text_color: !lambda |-
+              if (isnan(x) || x <= 0) return lv_color_hex(0x000000);
+              return lv_color_hex(0xFFFFFF);
+        - if:
+            condition:
+              lambda: |-
+                return id(print_remaining).state <= 0 && id(bed_temperature).state <= 28;
+            then:
+              - light.turn_on:
+                  id: backlight
+                  brightness: 50%
+            else:
+              - light.turn_on:
+                  id: backlight
+                  brightness: 100%
+  # Bed temperature - kept off-screen for backlight gating only
+  - platform: homeassistant
+    id: bed_temperature
+    entity_id: sensor.badp1s_bed_temperature
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(print_remaining).state <= 0 && x <= 28;
+            then:
+              - light.turn_on:
+                  id: backlight
+                  brightness: 50%
+            else:
+              - light.turn_on:
+                  id: backlight
+                  brightness: 100%
+
+# Binary sensors
+binary_sensor:
+  # API/HA connection state - drives wifi icon color
+  - platform: status
+    id: api_connected
+    on_press:
+      - lvgl.label.update:
+          id: wifi_icon
+          text: ""
+          text_color: 0xFFFFFF
+    on_release:
+      - lvgl.label.update:
+          id: wifi_icon
+          text: ""
+          text_color: 0xC62828
+
+# HA Text Sensors
+text_sensor:
+  # Shop A/C current hvac_mode - drives popup state label
+  - platform: homeassistant
+    id: shop_ac_state
+    entity_id: climate.shop_shop_mr_cool_air_conditioner
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: shop_ac_state_label
+            text: !lambda |-
+              std::string s = x;
+              if (s.empty() || s == "unavailable" || s == "unknown") {
+                return std::string("Mr. Cool: --");
+              }
+              s[0] = toupper(s[0]);
+              return "Mr. Cool: " + s;
+            text_color: !lambda |-
+              std::string s = x;
+              if (s == "cool")      return lv_color_hex(0x2196F3);
+              if (s == "heat")      return lv_color_hex(0xFF5722);
+              if (s == "off")       return lv_color_hex(0x9E9E9E);
+              if (s == "fan_only")  return lv_color_hex(0x00BCD4);
+              if (s == "dry")       return lv_color_hex(0xFFC107);
+              if (s == "auto" || s == "heat_cool") return lv_color_hex(0xFFFFFF);
+              return lv_color_hex(0xFFEA00);
