@@ -1,0 +1,60 @@
+# ── BLE peripheral fragment for CYD (ESP32-3248S035C) dust-collection remote ──
+# This is NOT a standalone config — merge into the CYD's existing ESPHome YAML
+# (the one already running its other features). Adds a custom GATT service
+# that the Giga (BLE central, via ArduinoBLE) scans for, connects to, and
+# subscribes to for gate commands.
+#
+# UUIDs below are randomly generated placeholders unique to this project —
+# keep them as-is, they just need to match on both the CYD and Giga side.
+# See CLAUDE.md item 4 for the overall architecture.
+
+esp32_ble_server:
+  manufacturer: "DustCollection"
+  model: "CYD Remote"
+  services:
+    - uuid: "5f2d958b-1564-4547-9566-64862169a9e4"
+      advertise: true          # so the Giga can find it while scanning
+      characteristics:
+        - id: gate_cmd_char
+          uuid: "3c711568-4467-44b3-9f0f-a7efb402c8ba"
+          description: "Gate command"
+          read: true
+          notify: true
+          value:
+            data: [255]         # 255 = idle/no-command sentinel; 0-3 = gate index
+            type: uint8_t
+
+# One parameterized script instead of duplicating a BLE block per button —
+# wire each of the 4 tool buttons' existing on_press/on_click to
+# `script.execute: {id: send_gate_command, gate_index: N}`.
+script:
+  - id: send_gate_command
+    parameters:
+      gate_index: int
+    then:
+      - ble_server.characteristic.set_value:
+          id: gate_cmd_char
+          value: !lambda 'return std::vector<uint8_t>{(uint8_t) gate_index};'
+      - ble_server.characteristic.notify:
+          id: gate_cmd_char
+
+# ── Example wiring (adjust to however your existing buttons are defined —
+# physical GPIO buttons, LVGL touch buttons, etc.) ──
+#
+# button:
+#   - platform: template
+#     name: "Tool 1 Gate"
+#     on_press:
+#       - script.execute:
+#           id: send_gate_command
+#           gate_index: 0
+#   - platform: template
+#     name: "Tool 2 Gate"
+#     on_press:
+#       - script.execute:
+#           id: send_gate_command
+#           gate_index: 1
+#   ... etc for gate_index: 2, 3
+#
+# If your tool buttons live on an LVGL page instead, use the equivalent
+# `on_click:` trigger under the LVGL widget and call the same script.

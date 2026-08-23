@@ -71,6 +71,11 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
     `handleButtonPress(value)`
 - Gotcha: WiFi/BLE radio coexistence on CYD — fine for this low-traffic use,
   but worth watching if other CYD features are latency-sensitive
+- Draft code for both sides written and held as reference (not yet spliced
+  into the live sketches — waiting on CYD hardware flash before integration):
+  `BLE_Remote_CYD/ble_server_fragment.yaml` (CYD/ESPHome) and
+  `BLE_Remote_CYD/giga_ble_central_fragment.ino` (Giga/ArduinoBLE). Splice
+  points marked 1-7 in the `.ino` fragment.
 
 **5. 1-button remote for tool 4** *(deferred)*
 - Single-button wireless remote dedicated to tool 4's gate (separate from the 24-button Everything Remote / BLE plan above)
@@ -85,10 +90,11 @@ Automated shop dust collection controller. Migrating from **Arduino Mega 2560** 
 - **Hardware bring-up test** of the just-committed startup grace period
   (`STARTUP_GRACE_MS`) and trigger debounce (`TRIGGER_DEBOUNCE_SAMPLES`) —
   written and wired but not yet run on real hardware.
-- **Push to origin** — local `master` is ahead of `origin/master` (6 commits
-  as of this writing); not yet pushed.
-- Roadmap items 4 (BLE remote) and 5 (1-button remote, tool 4) remain
-  deferred — see Planned Features above.
+- **Flash CYD with `BLE_Remote_CYD/ble_server_fragment.yaml`**, then splice
+  `giga_ble_central_fragment.ino` into `DustCollection_Giga.ino` and test the
+  pair end-to-end — see item 4 above.
+- Roadmap item 5 (1-button remote, tool 4) remains deferred — see Planned
+  Features above.
 
 ## Libraries
 
