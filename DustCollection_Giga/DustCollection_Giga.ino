@@ -11,10 +11,14 @@
 //   - WiFi web server added for monitoring graphs and config
 //
 // ── CALIBRATION NOTE ─────────────────────────────────────────────────────────
-// CT sensor calibration (EMON_CAL = 111.1) was tuned for 5 V Mega supply.
-// Giga runs at 3.3 V; EmonLib compensates via readVcc() returning 3300 for ARM,
-// but actual measured Irms will differ from Mega. Re-tune EMON_CAL and
-// toolThresholds after hardware bring-up.
+// CT sensor calibration is per-channel (EMON_CAL[]); the Mega used a single
+// shared constant (111.1) for all 5 coils, tuned for its 5 V supply. Giga runs
+// at 3.3 V and EmonLib compensates via readVcc() returning 3300 for ARM, but
+// actual measured Irms will still differ from Mega, and per-channel front-end
+// tolerances mean each coil may need its own constant. Use
+// DustCollection_Giga/Calibration/Calibration.ino to derive real values
+// (clamp meter against raw ICAL=1 readings), then paste them in below.
+// Re-tune toolThresholds after hardware bring-up too.
 //
 // ── WEB UI ───────────────────────────────────────────────────────────────────
 // Set WIFI_SSID / WIFI_PASS below. When connected, the display header shows the
@@ -49,7 +53,11 @@ static const int BLAST_GATE_PINS[NUM_TOOLS] = {
     -1,   // Unused
 };
 static const int DC_RELAY_PIN = 51;
-static const double EMON_CAL  = 111.1;
+
+// One constant per tool/channel (A0..A4). Defaults are the Mega's shared
+// value as a placeholder — replace with per-channel results from
+// Calibration/Calibration.ino. Index 4 ("Unused") is not wired.
+static const double EMON_CAL[NUM_TOOLS] = {111.1, 111.1, 111.1, 111.1, 111.1};
 
 double toolThresholds[NUM_TOOLS] = {160.0, 260.0, 240.0, 300.0, 300.0};
 
@@ -58,6 +66,12 @@ static const unsigned long DISPLAY_INTERVAL     = 250;   // ms
 static const unsigned long TOOL_TRANSITION_TIME = 500;   // ms gate-open to DC-on
 static const unsigned long TOUCH_DEBOUNCE_MS    = 80;    // ms
 unsigned long              shutoffDelayMs        = 15000; // ms; configurable via web
+
+// After STARTUP's baseline pre-warm, current readings are still settling
+// (power-on transients). Keep tracking baseline during this window but don't
+// let anything trigger a gate/DC activation until it's elapsed.
+static const unsigned long STARTUP_GRACE_MS = 30000;
+unsigned long              monitoringGraceUntil = 0;
 
 // ── State machine ─────────────────────────────────────────────────────────────
 enum SystemState {
@@ -71,6 +85,12 @@ unsigned long previousMillis = 0;
 bool   gateOpen[NUM_TOOLS]     = {};
 double toolCurrents[NUM_TOOLS] = {};
 int    lastManualIndex         = -1;
+
+// Consecutive over-threshold samples required before a tool is considered "on".
+// Guards against single-sample noise spikes (e.g. an unterminated CT channel)
+// triggering a full activation/shutoff cycle.
+static const int TRIGGER_DEBOUNCE_SAMPLES = 3;
+int    overThresholdCount[NUM_TOOLS] = {};
 
 // ── EmonLib ───────────────────────────────────────────────────────────────────
 EnergyMonitor sensors[NUM_TOOLS];
@@ -180,7 +200,7 @@ void setup() {
     digitalWrite(DC_RELAY_PIN, HIGH);
 
     for (int i = 0; i < NUM_TOOLS; i++) {
-        sensors[i].current(A0 + i, EMON_CAL);
+        sensors[i].current(A0 + i, EMON_CAL[i]);
     }
 
     setupWifi();
@@ -381,7 +401,8 @@ void serveIndexPage(WiFiClient& client) {
         "</style></head><body>");
 
     // HTML structure
-    client.print("<h2>&#9889; Dust Collection System</h2>"
+    client.print("<h2>&#9889; Dust Collection System "
+        "<span id='uptime' style='font-size:.5em;color:#8b949e;font-weight:normal'></span></h2>"
         "<div class='card'><h3>Live Readings</h3>"
         "<div class='row' id='live'><em style='color:#8b949e'>Loading...</em></div></div>"
         "<div class='card'><h3>Current History (2 min) &mdash; dashed = threshold</h3>"
@@ -402,7 +423,7 @@ void serveIndexPage(WiFiClient& client) {
         "var N=['CNC Router','Table Saw','Sander','Drill Press','Unused'];\n"
         "var C=['#f85149','#58a6ff','#3fb950','#d29922','#a371f7'];\n"
         "var ready=false;\n"
-        "function drawChart(h,thr){\n"
+        "function drawChart(h,thr,bootAgo){\n"
         "  var cv=document.getElementById('c');\n"
         "  cv.width=cv.offsetWidth; cv.height=200;\n"
         "  var W=cv.width,H=cv.height,ctx=cv.getContext('2d');\n"
@@ -451,6 +472,24 @@ void serveIndexPage(WiFiClient& client) {
         "    ctx.fillStyle='#e6edf3'; ctx.font='11px system-ui';\n"
         "    ctx.fillText(N[i],26+i*110,14);\n"
         "  }\n"
+        "  // x-axis time labels (seconds ago)\n"
+        "  ctx.fillStyle='#8b949e'; ctx.font='10px system-ui'; ctx.textAlign='center';\n"
+        "  for(var k=0;k<=4;k++){\n"
+        "    var tx=k*(n-1)/4, secAgo=Math.round((n-1)-tx);\n"
+        "    var lbl=secAgo===0?'now':('-'+secAgo+'s');\n"
+        "    ctx.fillText(lbl,(tx/(n-1))*W,H-2);\n"
+        "  }\n"
+        "  ctx.textAlign='left';\n"
+        "  // boot marker: where the system last reset, if still in view\n"
+        "  if(bootAgo>=0 && bootAgo<n){\n"
+        "    var bx=((n-1-bootAgo)/(n-1))*W;\n"
+        "    ctx.strokeStyle='#e6edf3'; ctx.lineWidth=1;\n"
+        "    ctx.setLineDash([2,3]);\n"
+        "    ctx.beginPath(); ctx.moveTo(bx,20); ctx.lineTo(bx,H-12); ctx.stroke();\n"
+        "    ctx.setLineDash([]);\n"
+        "    ctx.fillStyle='#e6edf3'; ctx.font='10px system-ui';\n"
+        "    ctx.fillText('Boot',bx+3,30);\n"
+        "  }\n"
         "}\n");
 
     // JavaScript — live update
@@ -468,6 +507,10 @@ void serveIndexPage(WiFiClient& client) {
         "    html+='</div>';\n"
         "  }\n"
         "  document.getElementById('live').innerHTML=html;\n"
+        "  var up=d.bootSecondsAgo;\n"
+        "  var upStr='Uptime '+Math.floor(up/60)+'m '+(up%60)+'s';\n"
+        "  if(d.graceSecondsLeft>0) upStr+=' &mdash; settling, '+d.graceSecondsLeft+'s left';\n"
+        "  document.getElementById('uptime').innerHTML=upStr;\n"
         "  if(!ready){\n"
         "    ready=true;\n"
         "    var tf='';\n"
@@ -480,7 +523,7 @@ void serveIndexPage(WiFiClient& client) {
         "  }\n"
         "  var thresholds=[];\n"
         "  for(var i=0;i<d.tools.length;i++) thresholds.push(d.tools[i].threshold);\n"
-        "  drawChart(d.history,thresholds);\n"
+        "  drawChart(d.history,thresholds,d.bootSecondsAgo);\n"
         "}\n");
 
     // JavaScript — poll + form submit
@@ -537,6 +580,10 @@ void serveDataJson(WiFiClient& client) {
     }
     client.print("],\"shutoffSecs\":");
     client.print(shutoffDelayMs / 1000UL);
+    client.print(",\"bootSecondsAgo\":");
+    client.print(millis() / 1000UL);
+    client.print(",\"graceSecondsLeft\":");
+    client.print(millis() < monitoringGraceUntil ? (monitoringGraceUntil - millis()) / 1000UL : 0);
     client.print("}");
 }
 
@@ -636,7 +683,10 @@ void drawStatusBar() {
     tft.setCursor(14, 72);
     switch (currentState) {
         case STARTUP:           tft.print("Starting up...     "); break;
-        case MONITORING:        tft.print("Monitoring         "); break;
+        case MONITORING:
+            if (millis() < monitoringGraceUntil) tft.print("Settling after boot");
+            else                                 tft.print("Monitoring         ");
+            break;
         case TOOL_ACTIVATING:   tft.print("Tool detected...   "); break;
         case TOOL_RUNNING:      tft.print("Tool running       "); break;
         case TOOL_DEACTIVATING: tft.print("Shutting down...   "); break;
@@ -764,6 +814,18 @@ void updateSensors() {
     if (millis() - lastSensorMs < 100) return;
     lastSensorMs = millis();
     toolCurrents[sensorIndex] = sensors[sensorIndex].calcIrms(100);
+
+    // Baseline isn't converged yet during STARTUP, so a threshold comparison
+    // is meaningless (and power-on transients could otherwise pre-load the
+    // debounce counter before MONITORING even begins).
+    if (currentState != STARTUP) {
+        if (toolCurrents[sensorIndex] > tools[sensorIndex].baseline + toolThresholds[sensorIndex]) {
+            if (overThresholdCount[sensorIndex] < TRIGGER_DEBOUNCE_SAMPLES) overThresholdCount[sensorIndex]++;
+        } else {
+            overThresholdCount[sensorIndex] = 0;
+        }
+    }
+
     sensorIndex = (sensorIndex + 1) % NUM_TOOLS;
 }
 
@@ -789,6 +851,8 @@ void handleStartupState() {
         tools[i].baseline = tools[i].baseline * 0.9f + (float)toolCurrents[i] * 0.1f;
     }
     if (millis() - startMs >= 3000UL) {
+        for (int i = 0; i < NUM_TOOLS; i++) overThresholdCount[i] = 0;
+        monitoringGraceUntil = millis() + STARTUP_GRACE_MS;
         currentState = MONITORING;
     }
 }
@@ -797,7 +861,10 @@ void handleMonitoringState() {
     for (int i = 0; i < NUM_TOOLS; i++) {
         tools[i].baseline = tools[i].baseline * 0.995f + (float)toolCurrents[i] * 0.005f;
 
-        if (toolCurrents[i] > tools[i].baseline + toolThresholds[i]) {
+        if (millis() < monitoringGraceUntil) continue; // still settling after boot
+
+        if (overThresholdCount[i] >= TRIGGER_DEBOUNCE_SAMPLES) {
+            overThresholdCount[i] = 0;
             gateOpen[i] = true;
             if (BLAST_GATE_PINS[i] >= 0) digitalWrite(BLAST_GATE_PINS[i], LOW);
             if (i < NUM_TOOLS - 1) drawGateButton(i);
