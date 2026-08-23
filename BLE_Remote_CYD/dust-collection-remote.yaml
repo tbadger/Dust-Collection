@@ -3,6 +3,11 @@ esphome:
   friendly_name: Dust Collection Remote
   min_version: 2026.4.0
   name_add_mac_suffix: false
+  on_boot:
+    # Idle brightness — screen starts dim, touch wakes it, toggling a gate
+    # off dims it back down (see touchscreen on_touch and send_gate_command).
+    then:
+      - light.turn_on: { id: backlight, brightness: 10% }
 
 esp32:
   variant: esp32   # Confirmed: board silkscreen reads ESP32-32E (plain
@@ -63,7 +68,6 @@ touchscreen:
       - light.turn_on:
           id: backlight
           brightness: 100%
-      - script.execute: dim_backlight
 
 # Outputs
 output:
@@ -79,25 +83,80 @@ light:
     id: backlight
     restore_mode: ALWAYS_ON
 
+# Tracks which gate button is currently shown as active (-1 = none) — mirrors
+# the Giga's own radio-button toggle behavior (see handleButtonPress() in
+# DustCollection_Giga.ino) so the highlighted button matches what the Giga
+# actually did with the same tap.
+globals:
+  - id: selected_gate
+    type: int
+    restore_value: no
+    initial_value: '-1'
+
 # Scripts
 script:
-  # Idle dim — unconditional now (no print/bed-temp gating like the old
-  # mini-dash had; this board no longer tracks those entities).
-  - id: dim_backlight
-    mode: restart
-    then:
-      - delay: 2min
-      - light.turn_on:
-          id: backlight
-          brightness: 50%
-
   # One parameterized script for all 4 gate buttons — CYD is the BLE
   # CENTRAL here (role swap — see CLAUDE.md item 4). Writes the gate index
   # straight to the Giga's characteristic instead of notifying subscribers.
+  #
+  # Radio-button toggle: tapping the already-active button turns it off,
+  # tapping a different one switches to it — same gate_index is sent either
+  # way, since the Giga's handleButtonPress() interprets the toggle itself.
+  # This script mirrors that outcome optimistically (no status feedback
+  # comes back over BLE) so the highlighted button matches what the Giga did.
   - id: send_gate_command
     parameters:
       gate_index: int
     then:
+      - lambda: |-
+          bool was_active = (id(selected_gate) == gate_index);
+          id(selected_gate) = was_active ? -1 : gate_index;
+      # Toggling off dims the screen back down; selecting/switching keeps it
+      # bright. on_touch already jumps to 100% on the tap itself — this is
+      # the explicit toggle-off case, and reinforces the on case too.
+      - if:
+          condition:
+            lambda: 'return id(selected_gate) < 0;'
+          then:
+            - light.turn_on: { id: backlight, brightness: 10% }
+          else:
+            - light.turn_on: { id: backlight, brightness: 100% }
+      # Clear all four borders + label colors, then re-highlight whichever
+      # one is active now (if any) — simpler than tracking "which one was
+      # previously lit". Selected label goes black-on-white border for
+      # max contrast against its own bg_color.
+      - lvgl.widget.update: { id: gate_btn_0, border_width: 0 }
+      - lvgl.widget.update: { id: gate_btn_1, border_width: 0 }
+      - lvgl.widget.update: { id: gate_btn_2, border_width: 0 }
+      - lvgl.widget.update: { id: gate_btn_3, border_width: 0 }
+      - lvgl.label.update: { id: gate_lbl_0, text_color: 0xFFFFFF }
+      - lvgl.label.update: { id: gate_lbl_1, text_color: 0xFFFFFF }
+      - lvgl.label.update: { id: gate_lbl_2, text_color: 0xFFFFFF }
+      - lvgl.label.update: { id: gate_lbl_3, text_color: 0xFFFFFF }
+      - if:
+          condition:
+            lambda: 'return id(selected_gate) == 0;'
+          then:
+            - lvgl.widget.update: { id: gate_btn_0, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER }
+            - lvgl.label.update: { id: gate_lbl_0, text_color: 0x000000 }
+      - if:
+          condition:
+            lambda: 'return id(selected_gate) == 1;'
+          then:
+            - lvgl.widget.update: { id: gate_btn_1, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER }
+            - lvgl.label.update: { id: gate_lbl_1, text_color: 0x000000 }
+      - if:
+          condition:
+            lambda: 'return id(selected_gate) == 2;'
+          then:
+            - lvgl.widget.update: { id: gate_btn_2, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER }
+            - lvgl.label.update: { id: gate_lbl_2, text_color: 0x000000 }
+      - if:
+          condition:
+            lambda: 'return id(selected_gate) == 3;'
+          then:
+            - lvgl.widget.update: { id: gate_btn_3, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER }
+            - lvgl.label.update: { id: gate_lbl_3, text_color: 0x000000 }
       - ble_client.ble_write:
           id: giga_ble
           service_uuid: "5f2d958b-1564-4547-9566-64862169a9e4"
@@ -107,8 +166,9 @@ script:
           id: status_label
           text: !lambda |-
             static const char* names[] = {"CNC Router", "Table Saw", "Sander", "Drill Press"};
-            std::string s = "Sent: ";
-            s += names[gate_index];
+            if (id(selected_gate) < 0) return std::string("Tap a tool to route dust collection");
+            std::string s = "Routing to: ";
+            s += names[id(selected_gate)];
             return s;
 
 # BLE central — CYD connects out to the Giga's peripheral advertisement
@@ -165,6 +225,7 @@ lvgl:
                   gate_index: 0
             widgets:
               - label:
+                  id: gate_lbl_0
                   text: "CNC Router"
                   align: CENTER
                   text_font: montserrat_32
@@ -185,6 +246,7 @@ lvgl:
                   gate_index: 1
             widgets:
               - label:
+                  id: gate_lbl_1
                   text: "Table Saw"
                   align: CENTER
                   text_font: montserrat_32
@@ -205,6 +267,7 @@ lvgl:
                   gate_index: 2
             widgets:
               - label:
+                  id: gate_lbl_2
                   text: "Sander"
                   align: CENTER
                   text_font: montserrat_32
@@ -225,6 +288,7 @@ lvgl:
                   gate_index: 3
             widgets:
               - label:
+                  id: gate_lbl_3
                   text: "Drill Press"
                   align: CENTER
                   text_font: montserrat_32
