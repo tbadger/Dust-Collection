@@ -121,42 +121,41 @@ script:
             - light.turn_on: { id: backlight, brightness: 40% }
           else:
             - light.turn_on: { id: backlight, brightness: 100% }
-      # Clear all four borders + label colors, then re-highlight whichever
-      # one is active now (if any) — simpler than tracking "which one was
-      # previously lit". Selected label goes black-on-white border for
-      # max contrast against its own bg_color.
-      - lvgl.widget.update: { id: gate_btn_0, border_width: 0 }
-      - lvgl.widget.update: { id: gate_btn_1, border_width: 0 }
-      - lvgl.widget.update: { id: gate_btn_2, border_width: 0 }
-      - lvgl.widget.update: { id: gate_btn_3, border_width: 0 }
-      - lvgl.label.update: { id: gate_lbl_0, text_color: 0xFFFFFF }
-      - lvgl.label.update: { id: gate_lbl_1, text_color: 0xFFFFFF }
-      - lvgl.label.update: { id: gate_lbl_2, text_color: 0xFFFFFF }
-      - lvgl.label.update: { id: gate_lbl_3, text_color: 0xFFFFFF }
+      # Clear all four back to their resting bg_color/text_color + no
+      # border, then re-highlight whichever one is active now (if any) —
+      # simpler than tracking "which one was previously lit".
+      - lvgl.widget.update: { id: gate_btn_0, border_width: 0, bg_color: 0xF85149 }
+      - lvgl.widget.update: { id: gate_btn_1, border_width: 0, bg_color: 0x58A6FF }
+      - lvgl.widget.update: { id: gate_btn_2, border_width: 0, bg_color: 0x3FB950 }
+      - lvgl.widget.update: { id: gate_btn_3, border_width: 0, bg_color: 0xD29922 }
+      - lvgl.label.update: { id: gate_lbl_0, text_color: 0x000000 }
+      - lvgl.label.update: { id: gate_lbl_1, text_color: 0x000000 }
+      - lvgl.label.update: { id: gate_lbl_2, text_color: 0x000000 }
+      - lvgl.label.update: { id: gate_lbl_3, text_color: 0x000000 }
       - if:
           condition:
             lambda: 'return id(selected_gate) == 0;'
           then:
-            - lvgl.widget.update: { id: gate_btn_0, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER }
-            - lvgl.label.update: { id: gate_lbl_0, text_color: 0x000000 }
+            - lvgl.widget.update: { id: gate_btn_0, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER, bg_color: 0x087305 }
+            - lvgl.label.update: { id: gate_lbl_0, text_color: 0xFFFFFF }
       - if:
           condition:
             lambda: 'return id(selected_gate) == 1;'
           then:
-            - lvgl.widget.update: { id: gate_btn_1, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER }
-            - lvgl.label.update: { id: gate_lbl_1, text_color: 0x000000 }
+            - lvgl.widget.update: { id: gate_btn_1, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER, bg_color: 0x087305 }
+            - lvgl.label.update: { id: gate_lbl_1, text_color: 0xFFFFFF }
       - if:
           condition:
             lambda: 'return id(selected_gate) == 2;'
           then:
-            - lvgl.widget.update: { id: gate_btn_2, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER }
-            - lvgl.label.update: { id: gate_lbl_2, text_color: 0x000000 }
+            - lvgl.widget.update: { id: gate_btn_2, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER, bg_color: 0x087305 }
+            - lvgl.label.update: { id: gate_lbl_2, text_color: 0xFFFFFF }
       - if:
           condition:
             lambda: 'return id(selected_gate) == 3;'
           then:
-            - lvgl.widget.update: { id: gate_btn_3, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER }
-            - lvgl.label.update: { id: gate_lbl_3, text_color: 0x000000 }
+            - lvgl.widget.update: { id: gate_btn_3, border_width: 5, border_color: 0xFFFFFF, border_opa: COVER, bg_color: 0x087305 }
+            - lvgl.label.update: { id: gate_lbl_3, text_color: 0xFFFFFF }
       - ble_client.ble_write:
           id: giga_ble
           service_uuid: "5f2d958b-1564-4547-9566-64862169a9e4"
@@ -229,7 +228,7 @@ lvgl:
                   text: "CNC Router"
                   align: CENTER
                   text_font: montserrat_32
-                  text_color: 0xFFFFFF
+                  text_color: 0x000000
 
         # Tool 2 — Table Saw
         - button:
@@ -250,7 +249,7 @@ lvgl:
                   text: "Table Saw"
                   align: CENTER
                   text_font: montserrat_32
-                  text_color: 0xFFFFFF
+                  text_color: 0x000000
 
         # Tool 3 — Sander
         - button:
@@ -271,7 +270,7 @@ lvgl:
                   text: "Sander"
                   align: CENTER
                   text_font: montserrat_32
-                  text_color: 0xFFFFFF
+                  text_color: 0x000000
 
         # Tool 4 — Drill Press (DC only, no gate pin on Giga side)
         - button:
@@ -292,7 +291,7 @@ lvgl:
                   text: "Drill Press"
                   align: CENTER
                   text_font: montserrat_32
-                  text_color: 0xFFFFFF
+                  text_color: 0x000000
 
         - label:
             id: wifi_icon
