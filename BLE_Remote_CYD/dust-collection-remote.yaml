@@ -47,7 +47,6 @@ display:
     cs_pin: GPIO15
     dc_pin: GPIO2
     invert_colors: false
-    rotation: 0
     id: my_display
 
 # Touchscreen
@@ -62,6 +61,11 @@ touchscreen:
       x_max: 3800
       y_min: 200
       y_max: 3800
+    # Rotation is handled by lvgl: (rotation: 180 below), which auto-remaps
+    # touch coordinates to match — don't add mirror_x/mirror_y here for the
+    # rotation itself, only if the touch axes turn out not to match the
+    # display's on their own. This mirror_y predates the 180° rotation
+    # change; verify it's still correct/needed after testing on hardware.
     transform:
       mirror_y: true
     on_touch:
@@ -165,7 +169,7 @@ script:
           id: status_label
           text: !lambda |-
             static const char* names[] = {"CNC Router", "Table Saw", "Sander", "Drill Press"};
-            if (id(selected_gate) < 0) return std::string("Tap a tool to route dust collection");
+            if (id(selected_gate) < 0) return std::string("Select a Tool for dust collection");
             std::string s = "Routing to: ";
             s += names[id(selected_gate)];
             return s;
@@ -188,6 +192,7 @@ lvgl:
     - my_display
   touchscreens:
     - my_touch
+  rotation: 180
   bg_color: 0x000000
   default_font: montserrat_24
   pages:
@@ -203,7 +208,7 @@ lvgl:
             text_color: 0xFFFFFF
         - label:
             id: status_label
-            text: "Tap a tool to route dust collection"
+            text: "Select a Tool for dust collection"
             align: TOP_MID
             y: 40
             text_font: montserrat_16
@@ -230,11 +235,11 @@ lvgl:
                   text_font: montserrat_32
                   text_color: 0x000000
 
-        # Tool 2 — Table Saw
+        # Tool 2 — Table Saw (3rd on screen — see display order comment below)
         - button:
             id: gate_btn_1
             x: 8
-            y: 172
+            y: 278
             width: 304
             height: 96
             radius: 10
@@ -251,11 +256,13 @@ lvgl:
                   text_font: montserrat_32
                   text_color: 0x000000
 
-        # Tool 3 — Sander
+        # Tool 3 — Sander (2nd on screen — display order is CNC Router,
+        # Sander, Table Saw, Drill Press; button ids/gate_index stay tied
+        # to tool identity, only y position (screen order) changed)
         - button:
             id: gate_btn_2
             x: 8
-            y: 278
+            y: 172
             width: 304
             height: 96
             radius: 10
